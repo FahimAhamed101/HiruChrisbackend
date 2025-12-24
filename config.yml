@@ -1,0 +1,7 @@
+tunnel: wellbyn-tunnel
+credentials-file: /root/.cloudflared/hiruu-tunnel.json
+
+ingress:
+  - hostname: hiruu.grassroots-bd.com
+    service: http://localhost:5000
+  - service: http_status:404
