@@ -11,9 +11,11 @@ import { StaticController } from './static/static.controller';
 import { ColleaguesJobModule } from './auth/colleagues-job.module';
 import { CoinModule } from './auth/coin.module';
 import { ScheduleModule } from './auth/schedule.module';
+import { LeaveTrackingModule } from './auth/leave-tracking.module';
+
 @Module({
   imports: [
-    PrismaModule, ProfileModule, WorkforceModule,ColleaguesJobModule,CoinModule,ScheduleModule,
+    PrismaModule, ProfileModule, WorkforceModule,ColleaguesJobModule,CoinModule,ScheduleModule,LeaveTrackingModule,
     AuthModule,  ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',

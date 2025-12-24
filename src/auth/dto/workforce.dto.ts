@@ -181,7 +181,7 @@ export class RequestLeaveDto {
   @ApiProperty({ example: 'Family vacation', required: false })
   @IsOptional()
   @IsString()
-  reason?: string;
+  reason: string;
 }
 
 // dto/swap-request.dto.ts

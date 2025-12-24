@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-
+  
 }
 
 model User {
@@ -34,15 +34,16 @@ model User {
   // Leave relations
   shiftLeaves       ShiftLeave[]
   approvedLeaves    ShiftLeave[]    @relation("ApprovedLeaves")
-  leaveRequests     LeaveRequest[]
+  leaveRequests     LeaveRequest[]   @relation("UserLeaveRequests")
+  approvedLeaveRequests LeaveRequest[] @relation("ApprovedLeaveRequests")
   
   // Swap relations
   swapRequestsMade  SwapRequest[]   @relation("SwapRequester")
   swapRequestsReceived SwapRequest[] @relation("SwapWith")
   
   // Overtime relations
-  overtimeRequests  OvertimeRequest[]
-  approvedOvertimes OvertimeRequest[] @relation("ApprovedOvertimes")
+  overtimeRequests  OvertimeRequest[] @relation("UserOvertimeRequests")
+  approvedOvertimes OvertimeRequest[] @relation("ApprovedOvertimeRequests")
   
   // Shift issue relations
   shiftIssues       ShiftIssue[]
@@ -70,7 +71,6 @@ model User {
   @@index([email])
   @@index([phoneNumber])
   @@map("users")
-  
 }
 
 model Profile {
@@ -160,12 +160,12 @@ model Business {
   updatedAt   DateTime @updatedAt
   
   // Relations
-  owner       User     @relation("BusinessOwners", fields: [ownerId], references: [id], onDelete: Cascade)
-  users       UserBusiness[]
-  shifts      Shift[]
-  leaveRequests LeaveRequest[]
-  jobListings JobListing[]
+  owner           User               @relation("BusinessOwners", fields: [ownerId], references: [id], onDelete: Cascade)
+  users           UserBusiness[]
+  shifts          Shift[]
+  leaveRequests   LeaveRequest[]
   overtimeRequests OvertimeRequest[]
+  jobListings     JobListing[]
   
   @@map("businesses")
 }
@@ -212,18 +212,15 @@ model Shift {
   assignedBy   User?    @relation("AssignedShifts", fields: [assignedById], references: [id])
   
   // Relations
-  user        User      @relation("UserShifts", fields: [userId], references: [id], onDelete: Cascade)
-  business    Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  
-
-
-  
-  attendance   Attendance?
-  shiftLeave   ShiftLeave?
-  shiftSummary ShiftSummary?
-  shiftIssues  ShiftIssue[]
-  shiftMessages ShiftMessage[]
-  swapRequests SwapRequest[]
+  user              User             @relation("UserShifts", fields: [userId], references: [id], onDelete: Cascade)
+  business          Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  attendance        Attendance?
+  shiftLeave        ShiftLeave?
+  shiftSummary      ShiftSummary?
+  shiftIssues       ShiftIssue[]
+  shiftMessages     ShiftMessage[]
+  overtimeRequests  OvertimeRequest[]
+  swapRequests      SwapRequest[]
   
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -277,64 +274,76 @@ model ShiftLeave {
 }
 
 model LeaveRequest {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   userId     String
   businessId String
   startDate  DateTime
   endDate    DateTime
-  type       String   // vacation, sick, personal, other
-  reason     String?
-  status     String   @default("pending") // pending, approved, rejected
+  halfDay    Boolean   @default(false)
+  startTime  String?   // For half-day leaves
+  endTime    String?   // For half-day leaves
+  type       String    // sick_leave, personal_leave, work_from_home, emergency_leave, casual_leave, unpaid_leave, other
+  reason     String?   @db.Text  // make it optional
+  status     String    @default("pending") // pending, approved, rejected
+  approvedBy String?
+  approvedAt DateTime?
   
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  user       User      @relation("UserLeaveRequests", fields: [userId], references: [id], onDelete: Cascade)
+  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  approver   User?     @relation("ApprovedLeaveRequests", fields: [approvedBy], references: [id])
   
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
   
   @@index([userId])
   @@index([businessId])
+  @@index([status])
+  @@index([startDate])
   @@map("leave_requests")
 }
 
 model SwapRequest {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   shiftId        String
-  requestedBy    String   // User who wants to swap
-  swapWithUserId String?  // Specific user to swap with (optional)
-  reason         String?
-  status         String   @default("pending") // pending, accepted, rejected, cancelled
+  requestedBy    String
+  swapWithUserId String?
+  reason         String?   @db.Text
+  status         String    @default("pending") // pending, accepted, rejected, cancelled
   
-  shift          Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
-  requester      User     @relation("SwapRequester", fields: [requestedBy], references: [id], onDelete: Cascade)
-  swapWith       User?    @relation("SwapWith", fields: [swapWithUserId], references: [id], onDelete: Cascade)
+  shift          Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  requester      User      @relation("SwapRequester", fields: [requestedBy], references: [id], onDelete: Cascade)
+  swapWith       User?     @relation("SwapWith", fields: [swapWithUserId], references: [id], onDelete: SetNull)
   
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
   
   @@index([shiftId])
   @@index([requestedBy])
+  @@index([status])
   @@map("swap_requests")
 }
 
 model OvertimeRequest {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   userId         String
   businessId     String
+  shiftId        String?
   date           DateTime
-  overtimeStart  String   // HH:mm format
-  overtimeEnd    String   // HH:mm format
-  reason         String?  @db.Text
-  status         String   @default("pending") // pending, approved, rejected
+  overtimeStart  String    // HH:mm format
+  overtimeEnd    String    // HH:mm format
+  reason         String?   @db.Text
+  status         String    @default("pending") // pending, accepted, rejected
   approvedBy     String?
   approvedAt     DateTime?
   
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  approver       User?    @relation("ApprovedOvertimes", fields: [approvedBy], references: [id])
+  user           User      @relation("UserOvertimeRequests", fields: [userId], references: [id], onDelete: Cascade)
+  business       Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  shift          Shift?    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  approver       User?     @relation("ApprovedOvertimeRequests", fields: [approvedBy], references: [id])
   
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
   
   @@index([userId])
   @@index([businessId])

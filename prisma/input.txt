@@ -1,0 +1,53 @@
+# 1. Reset the database
+npx prisma migrate reset
+
+# 2. Run the migration
+npx prisma migrate dev --name add_leave_tracking
+
+# 3. Generate Prisma Client
+npx prisma generate
+
+
+# 1. Create a new migration that aligns with your current schema
+npx prisma migrate dev --name sync_schema --create-only
+
+# 2. Review the generated migration file
+# 3. If it looks correct, apply it
+npx prisma migrate dev
+
+# 4. Generate Prisma Client
+npx prisma generate
+
+Most Likely Solution:
+Since you're in development and the drift shows you have all the tables already created, I recommend:
+
+bash
+# 1. First, mark the current state as a baseline
+npx prisma db push
+
+# 2. Then create a migration that captures the current state
+npx prisma migrate dev --name baseline_schema
+
+# 3. Now you can continue with normal migrations
+npx prisma generate
+
+Alternative Quick Fix:
+If you just want to sync the schema without migrations:
+
+bash
+# This will align your database with your Prisma schema
+npx prisma db push
+
+# Then continue with migrations
+npx prisma migrate dev --name add_leave_tracking
+
+
+Important Notes:
+prisma db push - Directly syncs database with schema (doesn't create migration history)
+
+prisma migrate dev - Creates and applies migrations with history tracking
+
+prisma migrate reset - Drops database and reapplies all migrations (loses data)
+
+For your current situation:
+Since you're seeing all tables already exist, it seems like you may have run prisma db push before or manually created tables. The safest approach is:
