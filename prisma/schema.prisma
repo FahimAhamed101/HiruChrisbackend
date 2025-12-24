@@ -1,0 +1,586 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  phoneNumber  String?   @unique
+  password     String
+  fullName     String?
+  isVerified   Boolean   @default(false)
+  isActive     Boolean   @default(true)
+  rememberMe   Boolean   @default(false)
+  profileImage String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  
+  otps         OTP[]
+  profile      Profile?
+  
+  // Business relations
+  userBusinesses    UserBusiness[]
+  businesses        Business[]      @relation("BusinessOwners", fields: [], references: [])
+  
+  // Shift relations
+  shifts            Shift[]         @relation("UserShifts")
+  assignedShifts    Shift[]         @relation("AssignedShifts")
+  
+  // Leave relations
+  shiftLeaves       ShiftLeave[]
+  approvedLeaves    ShiftLeave[]    @relation("ApprovedLeaves")
+  leaveRequests     LeaveRequest[]
+  
+  // Swap relations
+  swapRequestsMade  SwapRequest[]   @relation("SwapRequester")
+  swapRequestsReceived SwapRequest[] @relation("SwapWith")
+  
+  // Overtime relations
+  overtimeRequests  OvertimeRequest[]
+  approvedOvertimes OvertimeRequest[] @relation("ApprovedOvertimes")
+  
+  // Shift issue relations
+  shiftIssues       ShiftIssue[]
+  resolvedIssues    ShiftIssue[]    @relation("ResolvedIssues")
+  
+  // Messaging
+  shiftMessages     ShiftMessage[]
+  
+  // Social features
+  engagements       Engagement[]
+  colleagueCode     ColleagueCode?
+  connections       UserConnection[] @relation("UserConnections")
+  connectedBy       UserConnection[] @relation("ConnectedUsers")
+  
+  // Job relations
+  postedJobs        JobListing[]     @relation("PostedJobs")
+  jobApplications   JobApplication[] @relation("JobApplications")
+  
+  // Coin and rewards
+  coinWallet        CoinWallet?
+  coinTransactions  CoinTransaction[]
+  achievements      Achievement[]
+  rewardRedemptions RewardRedemption[]
+  
+  @@index([email])
+  @@index([phoneNumber])
+  @@map("users")
+  
+}
+
+model Profile {
+  id               String        @id @default(cuid())
+  userId           String        @unique
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  bio              String?       @db.Text
+  dateOfBirth      String?
+  gender           Gender?
+  location         Json?         // Stores { name, address, latitude, longitude }
+  interests        String[]      // Array of interest IDs
+  profileProgress  Int           @default(0)
+  
+  socialMedia      SocialMedia[]
+  companies        Company[]
+  
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  
+  @@map("profiles")
+}
+
+model SocialMedia {
+  id            String   @id @default(cuid())
+  profileId     String
+  profile       Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  platform      String   // Facebook, LinkedIn, WhatsApp, Twitter, Telegram, Instagram
+  username      String?
+  profileHandle String?  // For LinkedIn profile IDs, etc.
+  phoneNumber   String?
+  url           String?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([profileId])
+  @@map("social_media")
+}
+
+model Company {
+  id                 String    @id @default(cuid())
+  profileId          String
+  profile            Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  name               String
+  startDate          DateTime?
+  endDate            DateTime?
+  jobTitle           String?
+  isCurrentlyWorking Boolean   @default(false)
+  
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  
+  @@index([profileId])
+  @@map("companies")
+}
+
+model OTP {
+  id        String   @id @default(cuid())
+  code      String
+  type      String   // "verification" | "password_reset" | "login"
+  isUsed    Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([code])
+  @@index([expiresAt])
+  @@map("otps")
+}
+
+model Business {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // hotel, restaurant, bar, retail, etc.
+  logo        String?
+  address     String?
+  description String?
+  ownerId     String
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  owner       User     @relation("BusinessOwners", fields: [ownerId], references: [id], onDelete: Cascade)
+  users       UserBusiness[]
+  shifts      Shift[]
+  leaveRequests LeaveRequest[]
+  jobListings JobListing[]
+  overtimeRequests OvertimeRequest[]
+  
+  @@map("businesses")
+}
+
+model UserBusiness {
+  id         String   @id @default(cuid())
+  userId     String
+  businessId String
+  isSelected Boolean  @default(false) // For multi-business selection
+  role       String?  // employee, manager, owner
+  
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  @@unique([userId, businessId])
+  @@index([userId])
+  @@index([businessId])
+  @@map("user_businesses")
+}
+
+model Shift {
+  id          String    @id @default(cuid())
+  userId      String
+  businessId  String
+  title       String
+  startTime   DateTime
+  endTime     DateTime
+  location    String?
+  hourlyRate  Float?
+  notes       String?   @db.Text
+  status      String    @default("scheduled") // scheduled, ongoing, completed, missed, leave_pending, leave_approved, cancelled
+  actualHours Float?
+  
+  // Break times
+  break       Boolean   @default(false)
+  breakStart  String?
+  breakEnd    String?
+  
+  // Assignment
+  assignedById String?
+  assignedBy   User?    @relation("AssignedShifts", fields: [assignedById], references: [id])
+  
+  // Relations
+  user        User      @relation("UserShifts", fields: [userId], references: [id], onDelete: Cascade)
+  business    Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  
+
+
+  
+  attendance   Attendance?
+  shiftLeave   ShiftLeave?
+  shiftSummary ShiftSummary?
+  shiftIssues  ShiftIssue[]
+  shiftMessages ShiftMessage[]
+  swapRequests SwapRequest[]
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([userId])
+  @@index([businessId])
+  @@index([startTime])
+  @@index([status])
+  @@map("shifts")
+}
+
+model Attendance {
+  id              String   @id @default(cuid())
+  shiftId         String   @unique
+  clockIn         DateTime
+  clockOut        DateTime?
+  clockInLocation Json?    // { latitude, longitude }
+  clockOutLocation Json?
+  
+  shift           Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([shiftId])
+  @@map("attendances")
+}
+
+model ShiftLeave {
+  id         String    @id @default(cuid())
+  shiftId    String    @unique
+  userId     String
+  type       String    // sick, vacation, personal, emergency
+  reason     String?   @db.Text
+  status     String    @default("pending") // pending, approved, rejected
+  approvedBy String?
+  approvedAt DateTime?
+  notes      String?   @db.Text
+  
+  shift      Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  approver   User?     @relation("ApprovedLeaves", fields: [approvedBy], references: [id])
+  
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  
+  @@index([shiftId])
+  @@index([userId])
+  @@index([status])
+  @@map("shift_leaves")
+}
+
+model LeaveRequest {
+  id         String   @id @default(cuid())
+  userId     String
+  businessId String
+  startDate  DateTime
+  endDate    DateTime
+  type       String   // vacation, sick, personal, other
+  reason     String?
+  status     String   @default("pending") // pending, approved, rejected
+  
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  @@index([userId])
+  @@index([businessId])
+  @@map("leave_requests")
+}
+
+model SwapRequest {
+  id             String   @id @default(cuid())
+  shiftId        String
+  requestedBy    String   // User who wants to swap
+  swapWithUserId String?  // Specific user to swap with (optional)
+  reason         String?
+  status         String   @default("pending") // pending, accepted, rejected, cancelled
+  
+  shift          Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  requester      User     @relation("SwapRequester", fields: [requestedBy], references: [id], onDelete: Cascade)
+  swapWith       User?    @relation("SwapWith", fields: [swapWithUserId], references: [id], onDelete: Cascade)
+  
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  
+  @@index([shiftId])
+  @@index([requestedBy])
+  @@map("swap_requests")
+}
+
+model OvertimeRequest {
+  id             String   @id @default(cuid())
+  userId         String
+  businessId     String
+  date           DateTime
+  overtimeStart  String   // HH:mm format
+  overtimeEnd    String   // HH:mm format
+  reason         String?  @db.Text
+  status         String   @default("pending") // pending, approved, rejected
+  approvedBy     String?
+  approvedAt     DateTime?
+  
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  approver       User?    @relation("ApprovedOvertimes", fields: [approvedBy], references: [id])
+  
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  
+  @@index([userId])
+  @@index([businessId])
+  @@index([status])
+  @@map("overtime_requests")
+}
+
+model ShiftIssue {
+  id          String   @id @default(cuid())
+  userId      String
+  shiftId     String?
+  issueType   String   // system_not_working, wrong_schedule, location_issue, payment_issue, other
+  description String   @db.Text
+  status      String   @default("reported") // reported, investigating, resolved, closed
+  resolvedBy  String?
+  resolvedAt  DateTime?
+  resolution  String?  @db.Text
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shift       Shift?   @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  resolver    User?    @relation("ResolvedIssues", fields: [resolvedBy], references: [id])
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([userId])
+  @@index([shiftId])
+  @@index([status])
+  @@map("shift_issues")
+}
+
+model ShiftSummary {
+  id          String   @id @default(cuid())
+  shiftId     String   @unique
+  notes       String?  @db.Text
+  attachments String[] // Array of file paths
+  
+  shift       Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([shiftId])
+  @@map("shift_summaries")
+}
+
+model ShiftMessage {
+  id        String   @id @default(cuid())
+  shiftId   String
+  senderId  String
+  message   String   @db.Text
+  isRead    Boolean  @default(false)
+  
+  shift     Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  sender    User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  
+  @@index([shiftId])
+  @@index([senderId])
+  @@map("shift_messages")
+}
+
+model CoinWallet {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  balance   Int      @default(0)
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([userId])
+  @@map("coin_wallets")
+}
+
+model CoinTransaction {
+  id          String   @id @default(cuid())
+  userId      String
+  type        String   // profile_completion, referral_bonus, shift_completion, achievement, etc.
+  amount      Int      // Positive for credit, negative for debit
+  description String?
+  metadata    Json?    // Additional data like { profileCompletion: 100 }
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("coin_transactions")
+}
+
+model Achievement {
+  id          String   @id @default(cuid())
+  userId      String
+  type        String   // profile_master, first_shift, week_warrior, etc.
+  title       String
+  description String
+  coinReward  Int      @default(0)
+  icon        String?
+  unlockedAt  DateTime @default(now())
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, type])
+  @@index([userId])
+  @@map("achievements")
+}
+
+model RewardRedemption {
+  id          String   @id @default(cuid())
+  userId      String
+  rewardId    String
+  rewardTitle String
+  coinsCost   Int
+  status      String   @default("pending") // pending, completed, cancelled
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([userId])
+  @@index([status])
+  @@map("reward_redemptions")
+}
+
+model ColleagueCode {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  code       String   @unique
+  businessId String?
+  expiresAt  DateTime
+  isUsed     Boolean  @default(false)
+  
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  @@index([code])
+  @@index([expiresAt])
+  @@map("colleague_codes")
+}
+
+model UserConnection {
+  id              String   @id @default(cuid())
+  userId          String
+  connectedUserId String
+  
+  user            User     @relation("UserConnections", fields: [userId], references: [id], onDelete: Cascade)
+  connectedUser   User     @relation("ConnectedUsers", fields: [connectedUserId], references: [id], onDelete: Cascade)
+  
+  createdAt       DateTime @default(now())
+  
+  @@unique([userId, connectedUserId])
+  @@index([userId])
+  @@index([connectedUserId])
+  @@map("user_connections")
+}
+
+model JobListing {
+  id             String   @id @default(cuid())
+  businessId     String
+  postedBy       String
+  title          String
+  description    String   @db.Text
+  location       String
+  jobType        String   // full_time, part_time, contract, temporary
+  category       String   // hospitality, retail, food_service, etc.
+  hourlyRate     Float?
+  requiredSkills String[] // Array of required skills
+  deadline       DateTime?
+  isActive       Boolean  @default(true)
+  
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  poster         User     @relation("PostedJobs", fields: [postedBy], references: [id], onDelete: Cascade)
+  
+  applications   JobApplication[]
+  
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  
+  @@index([businessId])
+  @@index([postedBy])
+  @@index([category])
+  @@index([jobType])
+  @@index([location])
+  @@map("job_listings")
+}
+
+model JobApplication {
+  id          String   @id @default(cuid())
+  jobId       String
+  applicantId String
+  coverLetter String?  @db.Text
+  resumePath  String?
+  status      String   @default("pending") // pending, reviewed, accepted, rejected
+  
+  job         JobListing @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  applicant   User       @relation("JobApplications", fields: [applicantId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@unique([jobId, applicantId])
+  @@index([jobId])
+  @@index([applicantId])
+  @@index([status])
+  @@map("job_applications")
+}
+
+model Engagement {
+  id          String   @id @default(cuid())
+  userId      String
+  type        String   // referral, bonus, achievement, etc.
+  points      Int
+  description String?
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([userId])
+  @@map("engagements")
+}
+
+model Holiday {
+  id          String   @id @default(cuid())
+  date        DateTime
+  name        String
+  description String?
+  businessId  String?  // If null, applies to all businesses
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([date])
+  @@map("holidays")
+}
+
+enum Gender {
+  male
+  female
+  other
+}
