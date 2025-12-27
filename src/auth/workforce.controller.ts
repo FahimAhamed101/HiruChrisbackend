@@ -4,19 +4,26 @@ import {
   Get,
   Post,
   Put,
+  Delete,
   Body,
+  Param,
   Query,
   UseGuards,
   Request,
   HttpCode,
   HttpStatus,
+  UseInterceptors,
+  UploadedFiles,
 } from '@nestjs/common';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
   ApiQuery,
+  ApiConsumes,
+  ApiBody,
 } from '@nestjs/swagger';
 import { WorkforceService } from './workforce.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -33,6 +40,7 @@ import {
   CreateSwapRequestDto,
   CreateTimeOffRequestDto,
 } from './dto/workforce.dto';
+import { CreateRoleDto, UpdateRoleDto } from './dto/roles.dto';
 
 @ApiTags('workforce')
 @Controller('workforce')
@@ -55,11 +63,106 @@ export class WorkforceController {
   // ==================== BUSINESS MANAGEMENT ====================
 
   @Post('business')
+  @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Create a new business' })
   @ApiResponse({ status: 201, description: 'Business created successfully' })
   @ApiResponse({ status: 409, description: 'Business already exists' })
-  async createBusiness(@Request() req, @Body() dto: CreateBusinessDto) {
-    return this.workforceService.createBusiness(req.user.id, dto);
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        profilePhoto: { type: 'string', format: 'binary' },
+        coverPhoto: { type: 'string', format: 'binary' },
+        name: { type: 'string' },
+        type: { type: 'string', enum: ['hotel', 'restaurant', 'bar', 'retail', 'other'] },
+        phoneNumber: { type: 'string' },
+        address: { type: 'string' },
+        description: { type: 'string' },
+        location: { type: 'string', description: 'JSON string' },
+        socialMedia: { type: 'string', description: 'JSON array string' },
+        logo: { type: 'string', description: 'Optional logo URL' },
+      },
+      required: ['name', 'type'],
+    },
+  })
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'profilePhoto', maxCount: 1 },
+      { name: 'coverPhoto', maxCount: 1 },
+    ]),
+  )
+  async createBusiness(
+    @Request() req,
+    @Body() dto: CreateBusinessDto,
+    @UploadedFiles()
+    files?: {
+      profilePhoto?: Express.Multer.File[];
+      coverPhoto?: Express.Multer.File[];
+    },
+  ) {
+    return this.workforceService.createBusiness(req.user.id, dto, files);
+  }
+
+  @Get('business/home')
+  @ApiOperation({ summary: 'Get business owner home dashboard' })
+  @ApiResponse({ status: 200, description: 'Business home data retrieved successfully' })
+  @ApiQuery({ name: 'businessId', required: false, description: 'Business ID' })
+  async getBusinessHome(@Request() req, @Query('businessId') businessId?: string) {
+    return this.workforceService.getBusinessHome(req.user.id, businessId);
+  }
+
+  @Get('manager/home')
+  @ApiOperation({ summary: 'Get manager home dashboard' })
+  @ApiResponse({ status: 200, description: 'Manager home data retrieved successfully' })
+  @ApiQuery({ name: 'businessId', required: false, description: 'Business ID' })
+  async getManagerHome(@Request() req, @Query('businessId') businessId?: string) {
+    return this.workforceService.getManagerHome(req.user.id, businessId);
+  }
+
+  // ==================== ROLE MANAGEMENT ====================
+
+  @Get('roles')
+  @ApiOperation({ summary: 'Get roles for a business (owner only)' })
+  @ApiResponse({ status: 200, description: 'Roles retrieved successfully' })
+  @ApiQuery({ name: 'businessId', required: true, description: 'Business ID' })
+  async getRoles(@Request() req, @Query('businessId') businessId: string) {
+    return this.workforceService.getRoles(req.user.id, businessId);
+  }
+
+  @Post('roles')
+  @ApiOperation({ summary: 'Create a role (owner only)' })
+  @ApiResponse({ status: 201, description: 'Role created successfully' })
+  @ApiResponse({ status: 409, description: 'Role already exists' })
+  async createRole(@Request() req, @Body() dto: CreateRoleDto) {
+    return this.workforceService.createRole(req.user.id, dto);
+  }
+
+  @Get('roles/:roleId')
+  @ApiOperation({ summary: 'Get role details (owner only)' })
+  @ApiResponse({ status: 200, description: 'Role retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'Role not found' })
+  async getRole(@Request() req, @Param('roleId') roleId: string) {
+    return this.workforceService.getRole(req.user.id, roleId);
+  }
+
+  @Put('roles/:roleId')
+  @ApiOperation({ summary: 'Update role (owner only)' })
+  @ApiResponse({ status: 200, description: 'Role updated successfully' })
+  @ApiResponse({ status: 404, description: 'Role not found' })
+  async updateRole(
+    @Request() req,
+    @Param('roleId') roleId: string,
+    @Body() dto: UpdateRoleDto,
+  ) {
+    return this.workforceService.updateRole(req.user.id, roleId, dto);
+  }
+
+  @Delete('roles/:roleId')
+  @ApiOperation({ summary: 'Delete role (owner only)' })
+  @ApiResponse({ status: 200, description: 'Role deleted successfully' })
+  @ApiResponse({ status: 404, description: 'Role not found' })
+  async deleteRole(@Request() req, @Param('roleId') roleId: string) {
+    return this.workforceService.deleteRole(req.user.id, roleId);
   }
 
   @Get('business')

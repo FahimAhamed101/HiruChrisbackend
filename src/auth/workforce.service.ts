@@ -6,6 +6,8 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   CreateBusinessDto,
   SelectBusinessDto,
@@ -19,6 +21,7 @@ import {
   CreateSwapRequestDto,
   CreateTimeOffRequestDto,
 } from './dto/workforce.dto';
+import { CreateRoleDto, UpdateRoleDto } from './dto/roles.dto';
 
 @Injectable()
 export class WorkforceService {
@@ -132,7 +135,347 @@ export class WorkforceService {
 
   // ==================== BUSINESS MANAGEMENT ====================
 
-  async createBusiness(userId: string, dto: CreateBusinessDto) {
+  async getBusinessHome(userId: string, businessId?: string) {
+    const business = await this.prisma.business.findFirst({
+      where: {
+        ...(businessId ? { id: businessId } : {}),
+        ownerId: userId,
+      },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business not found');
+    }
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const trendStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+
+    const weekStart = new Date(now);
+    weekStart.setDate(weekStart.getDate() - 6);
+    weekStart.setHours(0, 0, 0, 0);
+
+    const [
+      employeeCount,
+      managerCount,
+      totalShiftsThisMonth,
+      completedShiftsThisMonth,
+      totalHoursThisMonth,
+      todayShifts,
+      todayAttendance,
+      overtimeRequestsThisMonth,
+      leaveRequestsThisMonth,
+      activeJobListings,
+      recentShifts,
+      businessUsers,
+      ratingStats,
+      newRatingsThisWeek,
+    ] = await Promise.all([
+      this.prisma.userBusiness.count({ where: { businessId: business.id } }),
+      this.prisma.userBusiness.count({ where: { businessId: business.id, role: 'manager' } }),
+      this.prisma.shift.count({
+        where: {
+          businessId: business.id,
+          startTime: { gte: monthStart, lte: monthEnd },
+        },
+      }),
+      this.prisma.shift.count({
+        where: {
+          businessId: business.id,
+          status: 'completed',
+          startTime: { gte: monthStart, lte: monthEnd },
+        },
+      }),
+      this.prisma.shift.aggregate({
+        where: {
+          businessId: business.id,
+          startTime: { gte: monthStart, lte: monthEnd },
+        },
+        _sum: { actualHours: true },
+      }),
+      this.prisma.shift.findMany({
+        where: {
+          businessId: business.id,
+          startTime: { gte: todayStart, lte: todayEnd },
+        },
+        include: {
+          attendance: true,
+          user: true,
+        },
+      }),
+      this.prisma.attendance.findMany({
+        where: {
+          shift: {
+            businessId: business.id,
+            startTime: { gte: todayStart, lte: todayEnd },
+          },
+        },
+      }),
+      this.prisma.overtimeRequest.count({
+        where: {
+          businessId: business.id,
+          createdAt: { gte: monthStart, lte: monthEnd },
+        },
+      }),
+      this.prisma.leaveRequest.count({
+        where: {
+          businessId: business.id,
+          createdAt: { gte: monthStart, lte: monthEnd },
+        },
+      }),
+      this.prisma.jobListing.count({
+        where: {
+          businessId: business.id,
+          isActive: true,
+        },
+      }),
+      this.prisma.shift.findMany({
+        where: {
+          businessId: business.id,
+          startTime: { gte: trendStart, lte: todayEnd },
+        },
+        include: { user: true },
+      }),
+      this.prisma.userBusiness.findMany({
+        where: { businessId: business.id },
+        include: {
+          user: {
+            include: {
+              profile: true,
+            },
+          },
+        },
+      }),
+      this.prisma.rating.aggregate({
+        where: { businessId: business.id },
+        _avg: { score: true },
+      }),
+      this.prisma.rating.count({
+        where: {
+          businessId: business.id,
+          createdAt: { gte: weekStart, lte: todayEnd },
+        },
+      }),
+    ]);
+
+    const totalHoursValue = totalHoursThisMonth._sum.actualHours || 0;
+    const todayTotal = todayShifts.length;
+    const todayCompleted = todayShifts.filter(shift => shift.status === 'completed').length;
+    const todayOngoing = todayShifts.filter(shift => shift.status === 'ongoing').length;
+    const todayScheduled = todayShifts.filter(shift => shift.status === 'scheduled').length;
+    const todayMissed = todayShifts.filter(shift => shift.status === 'missed').length;
+
+    const clockedInCount = todayAttendance.filter(a => !a.clockOut).length;
+    const clockedOutCount = todayAttendance.filter(a => a.clockOut).length;
+
+    const trendDays = this.buildTrendDays(trendStart, todayEnd);
+    const trendMap = new Map(trendDays.map(day => [day, { date: day, completed: 0, missed: 0 }]));
+    for (const shift of recentShifts) {
+      const key = this.formatDateKey(shift.startTime);
+      const entry = trendMap.get(key);
+      if (!entry) continue;
+      if (shift.status === 'completed') entry.completed += 1;
+      if (shift.status === 'missed') entry.missed += 1;
+    }
+
+    const topPerformers = this.buildTopPerformers(recentShifts, employeeCount);
+
+    const profileProgressValues = businessUsers
+      .map(entry => entry.user?.profile?.profileProgress)
+      .filter((value): value is number => typeof value === 'number');
+    const profilesCompletion =
+      profileProgressValues.length > 0
+        ? Math.round(
+            profileProgressValues.reduce((sum, value) => sum + value, 0) /
+              profileProgressValues.length,
+          )
+        : 0;
+
+    return {
+      business: {
+        id: business.id,
+        name: business.name,
+        logo: business.logo,
+        profileImage: business.profileImage,
+        coverImage: business.coverImage,
+      },
+      businessSummary: {
+        employees: employeeCount,
+        managers: managerCount,
+        totalShifts: totalShiftsThisMonth,
+        completedShifts: completedShiftsThisMonth,
+        totalHours: Math.round(totalHoursValue * 10) / 10,
+        profilesCompletion,
+      },
+      todaysShiftsSummary: {
+        total: todayTotal,
+        scheduled: todayScheduled,
+        ongoing: todayOngoing,
+        completed: todayCompleted,
+        missed: todayMissed,
+      },
+      todaysAttendanceSummary: {
+        clockedIn: clockedInCount,
+        clockedOut: clockedOutCount,
+      },
+      performanceTrend: {
+        range: 'last_7_days',
+        series: Array.from(trendMap.values()),
+      },
+      teamInsights: {
+        avgHoursPerEmployee: employeeCount > 0 ? Math.round((totalHoursValue / employeeCount) * 10) / 10 : 0,
+        overtimeRequests: overtimeRequestsThisMonth,
+        leaveRequests: leaveRequestsThisMonth,
+        newRatingsThisWeek,
+        averageRating: ratingStats._avg.score
+          ? Math.round(ratingStats._avg.score * 10) / 10
+          : 0,
+      },
+      quickActions: [
+        { id: 'create_shift', label: 'Create Shift', icon: 'calendar' },
+        { id: 'manage_team', label: 'Team', icon: 'users' },
+        { id: 'job_posting', label: 'Post Job', icon: 'briefcase' },
+      ],
+      jobBoard: {
+        activeListings: activeJobListings,
+      },
+      topPerformers,
+    };
+  }
+
+  async getManagerHome(userId: string, businessId?: string) {
+    const managerBusiness = await this.prisma.userBusiness.findFirst({
+      where: {
+        userId,
+        role: 'manager',
+        ...(businessId ? { businessId } : {}),
+      },
+      include: { business: true },
+    });
+
+    if (!managerBusiness) {
+      throw new NotFoundException('Business not found for manager');
+    }
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    const business = managerBusiness.business;
+
+    const weekStart = new Date(now);
+    weekStart.setDate(weekStart.getDate() - 6);
+    weekStart.setHours(0, 0, 0, 0);
+
+    const [
+      todayShifts,
+      employeeCount,
+      leaveTodayCount,
+      activeJobListings,
+      ratingStats,
+      newRatingsThisWeek,
+    ] = await Promise.all([
+      this.prisma.shift.findMany({
+        where: {
+          businessId: business.id,
+          startTime: { gte: todayStart, lte: todayEnd },
+        },
+        include: { attendance: true, user: true },
+      }),
+      this.prisma.userBusiness.count({ where: { businessId: business.id } }),
+      this.prisma.leaveRequest.count({
+        where: {
+          businessId: business.id,
+          status: 'approved',
+          startDate: { lte: todayEnd },
+          endDate: { gte: todayStart },
+        },
+      }),
+      this.prisma.jobListing.count({
+        where: { businessId: business.id, isActive: true },
+      }),
+      this.prisma.rating.aggregate({
+        where: { businessId: business.id },
+        _avg: { score: true },
+      }),
+      this.prisma.rating.count({
+        where: {
+          businessId: business.id,
+          createdAt: { gte: weekStart, lte: todayEnd },
+        },
+      }),
+    ]);
+
+    let scheduledCount = 0;
+    let ongoingCount = 0;
+    let lateArrivals = 0;
+    let onTimeArrivals = 0;
+    let absentToday = 0;
+
+    for (const shift of todayShifts) {
+      if (shift.status === 'scheduled') scheduledCount += 1;
+      if (shift.status === 'ongoing') ongoingCount += 1;
+
+      const attendance = shift.attendance;
+      if (attendance?.clockIn) {
+        if (attendance.clockIn > shift.startTime) {
+          lateArrivals += 1;
+        } else {
+          onTimeArrivals += 1;
+        }
+      } else if (shift.startTime < now) {
+        absentToday += 1;
+      }
+    }
+
+    return {
+      business: {
+        id: business.id,
+        name: business.name,
+        logo: business.logo,
+        profileImage: business.profileImage,
+      },
+      todaysShiftsSummary: {
+        totalScheduled: scheduledCount,
+        lateArrivals,
+        currentlyWorking: ongoingCount,
+      },
+      todaysAttendanceSummary: {
+        onTime: onTimeArrivals,
+        late: lateArrivals,
+        absent: absentToday,
+      },
+      teamInsights: {
+        totalEmployees: employeeCount,
+        onLeaveToday: leaveTodayCount,
+        newRatingsThisWeek,
+        averageRating: ratingStats._avg.score
+          ? Math.round(ratingStats._avg.score * 10) / 10
+          : 0,
+      },
+      quickActions: [
+        { id: 'leave', label: 'Leave', icon: 'leave' },
+        { id: 'shift_request', label: 'Shift Request', icon: 'shift' },
+        { id: 'team_panel', label: 'Team Panel', icon: 'team' },
+        { id: 'week_schedule', label: 'Week Schedule', icon: 'calendar' },
+      ],
+      jobBoard: {
+        activeListings: activeJobListings,
+      },
+    };
+  }
+
+  async createBusiness(
+    userId: string,
+    dto: CreateBusinessDto,
+    files?: {
+      profilePhoto?: Express.Multer.File[];
+      coverPhoto?: Express.Multer.File[];
+    },
+  ) {
     // Check if business already exists
     const existing = await this.prisma.business.findFirst({
       where: {
@@ -145,13 +488,27 @@ export class WorkforceService {
       throw new ConflictException('Business with this name already exists');
     }
 
+    const profilePhoto = files?.profilePhoto?.[0];
+    const coverPhoto = files?.coverPhoto?.[0];
+    this.validateUploadedImages([profilePhoto, coverPhoto].filter(Boolean) as Express.Multer.File[]);
+    const profileImage = profilePhoto ? `/uploads/businesses/${profilePhoto.filename}` : undefined;
+    const coverImage = coverPhoto ? `/uploads/businesses/${coverPhoto.filename}` : undefined;
+    const location = dto.location ? this.parseJson(dto.location, 'location') : undefined;
+    const socialMedia = dto.socialMedia ? this.parseJson(dto.socialMedia, 'socialMedia') : undefined;
+    const logo = dto.logo || profileImage;
+
     const business = await this.prisma.business.create({
       data: {
         name: dto.name,
         type: dto.type,
-        logo: dto.logo,
+        logo,
+        profileImage,
+        coverImage,
         address: dto.address,
+        phoneNumber: dto.phoneNumber,
         description: dto.description,
+        location: location as any,
+        socialMedia: socialMedia as any,
         ownerId: userId,
       },
     });
@@ -505,6 +862,164 @@ export class WorkforceService {
     };
   }
 
+  // ==================== ROLE MANAGEMENT ====================
+
+  async getRoles(userId: string, businessId: string) {
+    const business = await this.getOwnedBusiness(userId, businessId);
+
+    const roles = await this.prisma.role.findMany({
+      where: { businessId: business.id },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return roles.map(role => ({
+      id: role.id,
+      name: role.name,
+      permissions: role.permissions,
+      isPredefined: role.isPredefined,
+    }));
+  }
+
+  private async getRolePermissionsCatalog() {
+    const sections = await this.prisma.permissionSection.findMany({
+      include: {
+        permissions: {
+          orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+        },
+      },
+      orderBy: [{ sortOrder: 'asc' }, { title: 'asc' }],
+    });
+
+    return {
+      sections: sections.map(section => ({
+        id: section.code,
+        title: section.title,
+        permissions: section.permissions.map(permission => ({
+          id: permission.code,
+          label: permission.label,
+        })),
+      })),
+    };
+  }
+
+  private async getAllowedPermissions() {
+    const catalog = await this.getRolePermissionsCatalog();
+    const allowed = new Map<string, Set<string>>();
+    for (const section of catalog.sections) {
+      allowed.set(
+        section.id,
+        new Set(section.permissions.map(permission => permission.id)),
+      );
+    }
+    return allowed;
+  }
+
+  private normalizePermissionSectionId(sectionId: string) {
+    const map: Record<string, string> = {
+      businessOverview: 'business_overview',
+      peopleManagement: 'people_management',
+      jobManagement: 'job_management',
+      shiftSchedule: 'shift_schedule',
+    };
+    return map[sectionId] || sectionId;
+  }
+
+  private async validatePermissionsInput(permissions?: Record<string, string[]>) {
+    if (!permissions) return;
+    const allowed = await this.getAllowedPermissions();
+    if (allowed.size === 0) {
+      return;
+    }
+
+    for (const [rawSectionId, actions] of Object.entries(permissions)) {
+      const sectionId = this.normalizePermissionSectionId(rawSectionId);
+      const allowedActions = allowed.get(sectionId);
+      if (!allowedActions) {
+        throw new BadRequestException(`Invalid permission section: ${rawSectionId}`);
+      }
+      if (!Array.isArray(actions)) {
+        throw new BadRequestException(`Permissions for ${rawSectionId} must be an array`);
+      }
+      for (const action of actions) {
+        if (!allowedActions.has(action)) {
+          throw new BadRequestException(`Invalid permission: ${rawSectionId}.${action}`);
+        }
+      }
+    }
+  }
+
+  async createRole(userId: string, dto: CreateRoleDto) {
+    const business = await this.getOwnedBusiness(userId, dto.businessId);
+
+    const existing = await this.prisma.role.findFirst({
+      where: { businessId: business.id, name: dto.name },
+    });
+
+    if (existing) {
+      throw new ConflictException('Role with this name already exists');
+    }
+
+    await this.validatePermissionsInput(dto.permissions);
+
+    const role = await this.prisma.role.create({
+      data: {
+        businessId: business.id,
+        name: dto.name,
+        permissions: dto.permissions as any,
+        isPredefined: dto.isPredefined || false,
+      },
+    });
+
+    return {
+      message: 'Role created successfully',
+      role,
+    };
+  }
+
+  async getRole(userId: string, roleId: string) {
+    const role = await this.getOwnedRole(userId, roleId);
+    return {
+      id: role.id,
+      name: role.name,
+      permissions: role.permissions,
+      isPredefined: role.isPredefined,
+    };
+  }
+
+  async updateRole(userId: string, roleId: string, dto: UpdateRoleDto) {
+    const role = await this.getOwnedRole(userId, roleId);
+
+    if (dto.name && dto.name !== role.name) {
+      const existing = await this.prisma.role.findFirst({
+        where: { businessId: role.businessId, name: dto.name },
+      });
+      if (existing) {
+        throw new ConflictException('Role with this name already exists');
+      }
+    }
+
+    await this.validatePermissionsInput(dto.permissions);
+
+    const updated = await this.prisma.role.update({
+      where: { id: role.id },
+      data: {
+        ...(dto.name && { name: dto.name }),
+        ...(dto.permissions && { permissions: dto.permissions as any }),
+      },
+    });
+
+    return {
+      message: 'Role updated successfully',
+      role: updated,
+    };
+  }
+
+  async deleteRole(userId: string, roleId: string) {
+    const role = await this.getOwnedRole(userId, roleId);
+    await this.prisma.role.delete({ where: { id: role.id } });
+    return { message: 'Role deleted successfully' };
+  }
+
   // ==================== HELPER METHODS ====================
 
   private formatShift(shift: any) {
@@ -558,6 +1073,98 @@ export class WorkforceService {
     // Implement holiday checking logic
     // This could check against a holidays table or external API
     return false;
+  }
+
+  private parseJson(value: string, fieldName: string) {
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      throw new BadRequestException(`Invalid ${fieldName} JSON`);
+    }
+  }
+
+  private validateUploadedImages(files: Express.Multer.File[]) {
+    if (!files.length) return;
+    const maxBytes = 1 * 1024 * 1024;
+    const invalid = files.find(file => file.size > maxBytes);
+    if (!invalid) return;
+
+    for (const file of files) {
+      const filePath = path.join(process.cwd(), 'uploads', 'businesses', file.filename);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+
+    throw new BadRequestException('Uploaded images must be 1MB or smaller');
+  }
+
+  private async getOwnedBusiness(userId: string, businessId: string) {
+    const business = await this.prisma.business.findFirst({
+      where: { id: businessId, ownerId: userId },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business not found');
+    }
+
+    return business;
+  }
+
+  private async getOwnedRole(userId: string, roleId: string) {
+    const role = await this.prisma.role.findUnique({
+      where: { id: roleId },
+    });
+
+    if (!role) {
+      throw new NotFoundException('Role not found');
+    }
+
+    await this.getOwnedBusiness(userId, role.businessId);
+    return role;
+  }
+
+  private formatDateKey(date: Date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  private buildTrendDays(start: Date, end: Date) {
+    const days: string[] = [];
+    const current = new Date(start);
+    current.setHours(0, 0, 0, 0);
+    const last = new Date(end);
+    last.setHours(0, 0, 0, 0);
+    while (current <= last) {
+      days.push(this.formatDateKey(current));
+      current.setDate(current.getDate() + 1);
+    }
+    return days;
+  }
+
+  private buildTopPerformers(shifts: any[], employeeCount: number) {
+    if (!employeeCount) {
+      return [];
+    }
+    const totals = new Map<string, { user: any; hours: number }>();
+    for (const shift of shifts) {
+      if (!shift.user || !shift.actualHours) continue;
+      const existing = totals.get(shift.userId) || { user: shift.user, hours: 0 };
+      existing.hours += shift.actualHours;
+      totals.set(shift.userId, existing);
+    }
+    return Array.from(totals.values())
+      .sort((a, b) => b.hours - a.hours)
+      .slice(0, 3)
+      .map((entry, index) => ({
+        rank: index + 1,
+        userId: entry.user.id,
+        name: entry.user.fullName,
+        profileImage: entry.user.profileImage,
+        hours: Math.round(entry.hours * 10) / 10,
+      }));
   }
 
  private async calculateProfileCompletion(userId: string): Promise<number> {

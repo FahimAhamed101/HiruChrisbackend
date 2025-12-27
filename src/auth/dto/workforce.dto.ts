@@ -24,6 +24,11 @@ export class CreateBusinessDto {
   @IsUrl()
   logo?: string;
 
+  @ApiProperty({ example: '+1 212 345 6087', required: false })
+  @IsOptional()
+  @IsString()
+  phoneNumber?: string;
+
   @ApiProperty({ example: '123 Main St, New York', required: false })
   @IsOptional()
   @IsString()
@@ -33,6 +38,24 @@ export class CreateBusinessDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @ApiProperty({
+    example: '{"name":"Central Park","address":"Central Park, New York, NY","latitude":40.785091,"longitude":-73.968285}',
+    required: false,
+    description: 'Location JSON string',
+  })
+  @IsOptional()
+  @IsString()
+  location?: string;
+
+  @ApiProperty({
+    example: '[{"platform":"Facebook","username":"@abc_f","url":"https://facebook.com/user"}]',
+    required: false,
+    description: 'Social media JSON array string',
+  })
+  @IsOptional()
+  @IsString()
+  socialMedia?: string;
 }
 
 export class SelectBusinessDto {

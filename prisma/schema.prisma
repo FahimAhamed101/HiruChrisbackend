@@ -67,6 +67,7 @@ model User {
   coinTransactions  CoinTransaction[]
   achievements      Achievement[]
   rewardRedemptions RewardRedemption[]
+  ratings           Rating[]
   
   @@index([email])
   @@index([phoneNumber])
@@ -152,8 +153,13 @@ model Business {
   name        String
   type        String   // hotel, restaurant, bar, retail, etc.
   logo        String?
+  profileImage String?
+  coverImage  String?
   address     String?
+  phoneNumber String?
   description String?
+  location    Json?
+  socialMedia Json?
   ownerId     String
   
   createdAt   DateTime @default(now())
@@ -166,6 +172,8 @@ model Business {
   leaveRequests   LeaveRequest[]
   overtimeRequests OvertimeRequest[]
   jobListings     JobListing[]
+  ratings         Rating[]
+  roles           Role[]
   
   @@map("businesses")
 }
@@ -472,6 +480,66 @@ model RewardRedemption {
   @@index([userId])
   @@index([status])
   @@map("reward_redemptions")
+}
+
+model PermissionSection {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  title     String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  permissions PermissionAction[]
+
+  @@map("permission_sections")
+}
+
+model PermissionAction {
+  id        String   @id @default(cuid())
+  sectionId String
+  code      String
+  label     String
+  sortOrder Int      @default(0)
+
+  section   PermissionSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@unique([sectionId, code])
+  @@index([sectionId])
+  @@map("permission_actions")
+}
+
+model Role {
+  id           String   @id @default(cuid())
+  businessId   String
+  name         String
+  permissions  Json?
+  isPredefined Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, name])
+  @@index([businessId])
+  @@map("roles")
+}
+
+model Rating {
+  id         String   @id @default(cuid())
+  businessId String
+  userId     String
+  score      Float
+  comment    String?  @db.Text
+  createdAt  DateTime @default(now())
+
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("ratings")
 }
 
 model ColleagueCode {

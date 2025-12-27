@@ -30,7 +30,7 @@ import {
   GetSwapRequestsDto,
   CreateSwapRequestDto,
   RespondSwapDto,
-} from './dto/track-hours.dto';
+} from './dto/leave-history.dto';
 
 @ApiTags('leave-tracking')
 @Controller('leave-tracking')

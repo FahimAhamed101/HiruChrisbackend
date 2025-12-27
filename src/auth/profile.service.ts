@@ -151,6 +151,14 @@ async getProfile(userId: string) {
     if (!file) {
       throw new BadRequestException('No file uploaded');
     }
+    const maxBytes = 1 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      const filePath = path.join(process.cwd(), 'uploads', 'profiles', file.filename);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+      throw new BadRequestException('Profile photo must be 1MB or smaller');
+    }
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
