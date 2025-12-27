@@ -253,48 +253,63 @@ export class ScheduleService {
     };
   }
 
-  async approveLeave(managerId: string, dto: ApproveLeaveDto) {
-    const leave = await this.prisma.shiftLeave.findUnique({
-      where: { id: dto.leaveId },
-      include: {
-        shift: {
-          include: {
-            business: true,
-          },
+ async approveLeave(managerId: string, dto: ApproveLeaveDto) {
+  const leave = await this.prisma.shiftLeave.findUnique({
+    where: { id: dto.leaveId },
+    include: {
+      shift: {
+        include: {
+          business: true,
         },
       },
-    });
+    },
+  });
 
-    if (!leave) {
-      throw new NotFoundException('Leave request not found');
-    }
-
-    // Update leave status
-    const updatedLeave = await this.prisma.shiftLeave.update({
-      where: { id: dto.leaveId },
-      data: {
-        status: dto.approved ? 'approved' : 'rejected',
-        approvedBy: managerId,
-        approvedAt: new Date(),
-        notes: dto.notes,
-      },
-    });
-
-    // Update shift status
-    await this.prisma.shift.update({
-      where: { id: leave.shiftId },
-      data: { 
-        status: dto.approved 
-          ? ShiftStatusEnum.LEAVE_APPROVED 
-          : ShiftStatusEnum.UPCOMING 
-      },
-    });
-
-    return {
-      message: dto.approved ? 'Leave approved' : 'Leave rejected',
-      leave: updatedLeave,
-    };
+  if (!leave) {
+    throw new NotFoundException('Leave request not found');
   }
+
+  // ✅ FIXED: Verify manager has permission for this business
+  const managerPermission = await this.prisma.userBusiness.findFirst({
+    where: {
+      userId: managerId,
+      businessId: leave.shift.businessId,
+      role: { in: ['manager', 'owner'] },
+    },
+  });
+
+  if (!managerPermission) {
+    throw new BadRequestException(
+      'You do not have permission to approve leave for this business'
+    );
+  }
+
+  // Update leave status
+  const updatedLeave = await this.prisma.shiftLeave.update({
+    where: { id: dto.leaveId },
+    data: {
+      status: dto.approved ? 'approved' : 'rejected',
+      approvedBy: managerId,
+      approvedAt: new Date(),
+      notes: dto.notes,
+    },
+  });
+
+  // Update shift status
+  await this.prisma.shift.update({
+    where: { id: leave.shiftId },
+    data: { 
+      status: dto.approved 
+        ? ShiftStatusEnum.LEAVE_APPROVED 
+        : ShiftStatusEnum.UPCOMING 
+    },
+  });
+
+  return {
+    message: dto.approved ? 'Leave approved' : 'Leave rejected',
+    leave: updatedLeave,
+  };
+}
 
   // ==================== OVERTIME ====================
 

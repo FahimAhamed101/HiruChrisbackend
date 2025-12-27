@@ -1,6 +1,17 @@
+import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { Pool } from 'pg';
+import * as bcrypt from 'bcrypt';
 
-const prisma = new PrismaClient();
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  throw new Error('DATABASE_URL is not set');
+}
+
+const pool = new Pool({ connectionString });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter });
 
 const catalog = [
   {
@@ -47,6 +58,71 @@ const catalog = [
 ];
 
 async function main() {
+  // Test seed: business + users + roles (idempotent via upserts)
+  const testUsers = [
+    { id: 'owner-1', email: 'owner@paradise.com', fullName: 'John Owner', password: 'Owner123!' },
+    { id: 'manager-1', email: 'manager@paradise.com', fullName: 'Sarah Manager', password: 'Manager123!' },
+    { id: 'cashier-1', email: 'cashier@paradise.com', fullName: 'Mike Cashier', password: 'Cashier123!' },
+    { id: 'waiter-1', email: 'waiter@paradise.com', fullName: 'Tom Waiter', password: 'Waiter123!' },
+    { id: 'house-1', email: 'house@paradise.com', fullName: 'Anna House', password: 'House123!' },
+  ] as const;
+
+  for (const user of testUsers) {
+    const hashedPassword = await bcrypt.hash(user.password, 10);
+
+    await prisma.user.upsert({
+      where: { id: user.id },
+      update: {
+        email: user.email,
+        fullName: user.fullName,
+        password: hashedPassword,
+        isVerified: true,
+        isActive: true,
+      },
+      create: {
+        id: user.id,
+        email: user.email,
+        password: hashedPassword,
+        fullName: user.fullName,
+        isVerified: true,
+        isActive: true,
+      },
+    });
+  }
+
+  await prisma.business.upsert({
+    where: { id: 'test-business-1' },
+    update: { name: 'Paradise Hotel', type: 'hotel', ownerId: 'owner-1' },
+    create: { id: 'test-business-1', name: 'Paradise Hotel', type: 'hotel', ownerId: 'owner-1' },
+  });
+
+  const roleAssignments = [
+    { userId: 'owner-1', role: 'owner' },
+    { userId: 'manager-1', role: 'manager' },
+    { userId: 'cashier-1', role: 'cashier' },
+    { userId: 'waiter-1', role: 'waiter' },
+    { userId: 'house-1', role: 'housekeeping_staff' },
+  ] as const;
+
+  for (const assignment of roleAssignments) {
+    await prisma.userBusiness.upsert({
+      where: {
+        userId_businessId: {
+          userId: assignment.userId,
+          businessId: 'test-business-1',
+        },
+      },
+      update: { role: assignment.role, isSelected: true },
+      create: {
+        id: `ub-${assignment.userId}-test-business-1`,
+        userId: assignment.userId,
+        businessId: 'test-business-1',
+        role: assignment.role,
+        isSelected: true,
+      },
+    });
+  }
+
   for (const section of catalog) {
     const savedSection = await prisma.permissionSection.upsert({
       where: { code: section.code },
@@ -81,4 +157,5 @@ main()
   })
   .finally(async () => {
     await prisma.$disconnect();
+    await pool.end();
   });

@@ -31,6 +31,14 @@
 $ npm install
 ```
 
+## Database seeding
+
+```bash
+$ npm run prisma:seed
+```
+
+This seeds a test business (`Paradise Hotel`) and test users (`owner@paradise.com`, `manager@paradise.com`, `cashier@paradise.com`, `waiter@paradise.com`, `house@paradise.com`) with passwords `Owner123!`, `Manager123!`, `Cashier123!`, `Waiter123!`, `House123!`.
+
 ## Compile and run the project
 
 ```bash

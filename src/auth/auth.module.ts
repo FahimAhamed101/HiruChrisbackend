@@ -1,3 +1,4 @@
+// src/auth/auth.module.ts - COMPLETE WITH PERMISSIONS
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
@@ -6,6 +7,7 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { RefreshTokenStrategy } from './strategies/refresh-token.strategy';
+import { PermissionsGuard } from './guards/permissions.guard';
 import { PrismaModule } from '../prisma/prisma.module';
 import { OtpService } from './otp.service';
 import { EmailService } from './email.service';
@@ -26,10 +28,11 @@ import { SmsService } from './sms.service';
     AuthService,
     JwtStrategy,
     RefreshTokenStrategy,
+    PermissionsGuard,
     OtpService,
     EmailService,
     SmsService,
   ],
-  exports: [AuthService],
+  exports: [AuthService, PermissionsGuard, JwtStrategy],
 })
 export class AuthModule {}
