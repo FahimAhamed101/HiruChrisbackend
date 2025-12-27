@@ -8,6 +8,8 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import * as fs from 'fs';
 import * as path from 'path';
+import { UserRole } from './enums/roles.enum';
+import { ROLE_PERMISSIONS } from './config/role-permissions.config';
 import {
   CreateBusinessDto,
   SelectBusinessDto,
@@ -21,7 +23,7 @@ import {
   CreateSwapRequestDto,
   CreateTimeOffRequestDto,
 } from './dto/workforce.dto';
-import { CreateRoleDto, UpdateRoleDto } from './dto/roles.dto';
+import { CreatePredefinedRoleDto, CreateRoleDto, UpdateRoleDto } from './dto/roles.dto';
 
 @Injectable()
 export class WorkforceService {
@@ -880,6 +882,82 @@ export class WorkforceService {
     }));
   }
 
+  async getRolesCatalog(userId: string, businessId: string) {
+    await this.getOwnedBusiness(userId, businessId);
+
+    const catalog = await this.getRolePermissionsCatalog();
+    return {
+      predefinedRoles: Object.values(UserRole).map((role) => ({
+        id: role,
+        label: role
+          .split('_')
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(' '),
+      })),
+      ...catalog,
+    };
+  }
+
+  private async buildSectionedPermissionsFromRole(role: UserRole) {
+    const catalog = await this.getRolePermissionsCatalog();
+    const permissionToSection = new Map<string, string>();
+
+    for (const section of catalog.sections) {
+      for (const permission of section.permissions) {
+        permissionToSection.set(permission.id, section.id);
+      }
+    }
+
+    const sectioned: Record<string, string[]> = {};
+    const permissions = ROLE_PERMISSIONS[role] || [];
+    for (const permission of permissions) {
+      const sectionId = permissionToSection.get(permission);
+      if (!sectionId) continue;
+      if (!sectioned[sectionId]) sectioned[sectionId] = [];
+      sectioned[sectionId].push(permission);
+    }
+
+    for (const [sectionId, actions] of Object.entries(sectioned)) {
+      sectioned[sectionId] = Array.from(new Set(actions)).sort();
+    }
+
+    return sectioned;
+  }
+
+  async createPredefinedRole(userId: string, dto: CreatePredefinedRoleDto) {
+    const business = await this.getOwnedBusiness(userId, dto.businessId);
+
+    const name = dto.role
+      .split('_')
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+
+    const existing = await this.prisma.role.findFirst({
+      where: { businessId: business.id, name },
+    });
+
+    if (existing) {
+      throw new ConflictException('Role with this name already exists');
+    }
+
+    const permissions = await this.buildSectionedPermissionsFromRole(dto.role);
+    await this.validatePermissionsInput(permissions);
+
+    const role = await this.prisma.role.create({
+      data: {
+        businessId: business.id,
+        name,
+        permissions: permissions as any,
+        isPredefined: true,
+      },
+    });
+
+    return {
+      message: 'Role created successfully',
+      role,
+    };
+  }
+
   private async getRolePermissionsCatalog() {
     const sections = await this.prisma.permissionSection.findMany({
       include: {
@@ -920,6 +998,12 @@ export class WorkforceService {
       peopleManagement: 'people_management',
       jobManagement: 'job_management',
       shiftSchedule: 'shift_schedule',
+      leaveManagement: 'leave_management',
+      overtimeManagement: 'overtime_management',
+      swapRequests: 'swap_requests',
+      shiftOperations: 'shift_operations',
+      attendanceHours: 'attendance_hours',
+      businessManagement: 'business_management',
     };
     return map[sectionId] || sectionId;
   }

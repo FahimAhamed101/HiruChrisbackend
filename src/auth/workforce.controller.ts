@@ -40,7 +40,7 @@ import {
   CreateSwapRequestDto,
   CreateTimeOffRequestDto,
 } from './dto/workforce.dto';
-import { CreateRoleDto, UpdateRoleDto } from './dto/roles.dto';
+import { CreatePredefinedRoleDto, CreateRoleDto, UpdateRoleDto } from './dto/roles.dto';
 
 @ApiTags('workforce')
 @Controller('workforce')
@@ -121,12 +121,28 @@ export class WorkforceController {
 
   // ==================== ROLE MANAGEMENT ====================
 
+  @Get('roles/catalog')
+  @ApiOperation({ summary: 'Get role permissions catalog (owner only)' })
+  @ApiResponse({ status: 200, description: 'Catalog retrieved successfully' })
+  @ApiQuery({ name: 'businessId', required: true, description: 'Business ID' })
+  async getRolesCatalog(@Request() req, @Query('businessId') businessId: string) {
+    return this.workforceService.getRolesCatalog(req.user.id, businessId);
+  }
+
   @Get('roles')
   @ApiOperation({ summary: 'Get roles for a business (owner only)' })
   @ApiResponse({ status: 200, description: 'Roles retrieved successfully' })
   @ApiQuery({ name: 'businessId', required: true, description: 'Business ID' })
   async getRoles(@Request() req, @Query('businessId') businessId: string) {
     return this.workforceService.getRoles(req.user.id, businessId);
+  }
+
+  @Post('roles/predefined')
+  @ApiOperation({ summary: 'Create a predefined role (owner only)' })
+  @ApiResponse({ status: 201, description: 'Role created successfully' })
+  @ApiResponse({ status: 409, description: 'Role already exists' })
+  async createPredefinedRole(@Request() req, @Body() dto: CreatePredefinedRoleDto) {
+    return this.workforceService.createPredefinedRole(req.user.id, dto);
   }
 
   @Post('roles')

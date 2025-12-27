@@ -1,5 +1,6 @@
-import { IsBoolean, IsObject, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsEnum, IsObject, IsOptional, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { UserRole } from '../enums/roles.enum';
 
 export class CreateRoleDto {
   @ApiProperty({ example: 'business-id', description: 'Business ID' })
@@ -47,3 +48,12 @@ export class UpdateRoleDto {
   permissions?: Record<string, string[]>;
 }
 
+export class CreatePredefinedRoleDto {
+  @ApiProperty({ example: 'business-id', description: 'Business ID' })
+  @IsString()
+  businessId: string;
+
+  @ApiProperty({ example: UserRole.MANAGER, enum: UserRole, description: 'Predefined role code' })
+  @IsEnum(UserRole)
+  role: UserRole;
+}

@@ -84,16 +84,55 @@ export class PermissionsGuard implements CanActivate {
 
     // Check if user has required permissions
     if (requiredPermissions) {
-      const userRoles = userBusinesses
-        .map((ub) => ub.role)
-        .filter((role): role is UserRole => role !== null);
+      const userPermissions = new Set<string>();
 
-      // Get all permissions for user's roles
-      const userPermissions = new Set<Permission>();
-      userRoles.forEach((role) => {
-        const rolePermissions = ROLE_PERMISSIONS[role] || [];
-        rolePermissions.forEach((perm) => userPermissions.add(perm));
-      });
+      const customRoleQueries: { businessId: string; name: string }[] = [];
+
+      for (const ub of userBusinesses) {
+        if (!ub.role) continue;
+
+        const maybePredefined = ub.role as UserRole;
+        if (Object.values(UserRole).includes(maybePredefined)) {
+          const rolePermissions = ROLE_PERMISSIONS[maybePredefined] || [];
+          rolePermissions.forEach((perm) => userPermissions.add(perm));
+          continue;
+        }
+
+        customRoleQueries.push({ businessId: ub.businessId, name: ub.role });
+      }
+
+      if (customRoleQueries.length > 0) {
+        const dbRoles = await this.prisma.role.findMany({
+          where: {
+            OR: customRoleQueries.map((q) => ({
+              businessId: q.businessId,
+              name: q.name,
+            })),
+          },
+          select: { permissions: true },
+        });
+
+        for (const role of dbRoles) {
+          const permissions = role.permissions as unknown;
+          if (!permissions) continue;
+
+          if (Array.isArray(permissions)) {
+            for (const perm of permissions) {
+              if (typeof perm === 'string') userPermissions.add(perm);
+            }
+            continue;
+          }
+
+          if (typeof permissions === 'object') {
+            for (const actions of Object.values(permissions as Record<string, unknown>)) {
+              if (!Array.isArray(actions)) continue;
+              for (const action of actions) {
+                if (typeof action === 'string') userPermissions.add(action);
+              }
+            }
+          }
+        }
+      }
 
       // Check if user has all required permissions
       const hasAllPermissions = requiredPermissions.every((permission) =>
