@@ -24,9 +24,6 @@ import {
 } from '@nestjs/swagger';
 import { ScheduleService } from './schedule.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { RequirePermissions } from '../auth/decorators/permissions.decorator';
-import { Permission } from '../auth/enums/permissions.enum';
 import {
   GetScheduleDto,
   RequestShiftLeaveDto,
@@ -39,7 +36,7 @@ import {
 
 @ApiTags('schedule')
 @Controller('schedule')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class ScheduleController {
   constructor(private scheduleService: ScheduleService) {}
@@ -47,7 +44,6 @@ export class ScheduleController {
   // ==================== GET SCHEDULE ====================
 
   @Get('weekly')
-  @RequirePermissions(Permission.VIEW_SCHEDULE)
   @ApiOperation({ 
     summary: 'Get weekly schedule',
     description: 'Returns all shifts for the week containing the specified date'
@@ -61,7 +57,6 @@ export class ScheduleController {
   }
 
   @Get('daily/:date')
-  @RequirePermissions(Permission.VIEW_SCHEDULE)
   @ApiOperation({ 
     summary: 'Get daily schedule',
     description: 'Returns all shifts for a specific date, including holiday status'
@@ -73,7 +68,6 @@ export class ScheduleController {
   }
 
   @Get('shift/:shiftId')
-  @RequirePermissions(Permission.VIEW_OWN_SHIFTS)
   @ApiOperation({ 
     summary: 'Get shift details',
     description: 'Returns detailed information about a specific shift including countdown timer'
@@ -88,7 +82,6 @@ export class ScheduleController {
   // ==================== LEAVE MANAGEMENT ====================
 
   @Post('leave/request')
-  @RequirePermissions(Permission.REQUEST_LEAVE)
   @ApiOperation({ 
     summary: 'Request leave for a shift',
     description: 'Submit a leave request for a scheduled shift (Sick Leave button)'
@@ -101,7 +94,6 @@ export class ScheduleController {
   }
 
   @Post('leave/approve')
-  @RequirePermissions(Permission.APPROVE_LEAVE)
   @ApiOperation({ 
     summary: 'Approve or reject leave request (Manager/Owner only)',
     description: 'Manager endpoint to approve/reject leave requests'
@@ -117,7 +109,6 @@ export class ScheduleController {
   // ==================== OVERTIME ====================
 
   @Post('overtime/request')
-  @RequirePermissions(Permission.REQUEST_OVERTIME)
   @ApiOperation({ 
     summary: 'Request overtime',
     description: 'Submit overtime request (Overtime button from Quick Actions)'
@@ -131,7 +122,6 @@ export class ScheduleController {
   // ==================== ISSUE REPORTING ====================
 
   @Post('issue/report')
-  @RequirePermissions(Permission.REPORT_SHIFT_ISSUES)
   @ApiOperation({ 
     summary: 'Report a shift-related issue',
     description: 'Report issues like "System not working" (Report Issue button)'
@@ -145,7 +135,6 @@ export class ScheduleController {
   // ==================== SHIFT SUMMARY ====================
 
   @Post('shift/summary')
-  @RequirePermissions(Permission.SUBMIT_SHIFT_SUMMARY)
   @ApiOperation({ 
     summary: 'Submit shift summary',
     description: 'Submit notes and attachments after completing a shift'

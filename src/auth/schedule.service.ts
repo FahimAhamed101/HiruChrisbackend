@@ -269,21 +269,6 @@ export class ScheduleService {
     throw new NotFoundException('Leave request not found');
   }
 
-  // ✅ FIXED: Verify manager has permission for this business
-  const managerPermission = await this.prisma.userBusiness.findFirst({
-    where: {
-      userId: managerId,
-      businessId: leave.shift.businessId,
-      role: { in: ['manager', 'owner'] },
-    },
-  });
-
-  if (!managerPermission) {
-    throw new BadRequestException(
-      'You do not have permission to approve leave for this business'
-    );
-  }
-
   // Update leave status
   const updatedLeave = await this.prisma.shiftLeave.update({
     where: { id: dto.leaveId },

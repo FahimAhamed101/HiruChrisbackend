@@ -368,21 +368,6 @@ export class LeaveTrackingService {
     throw new NotFoundException('Overtime request not found');
   }
 
-  // ✅ FIXED: Verify manager has permission for this business
-  const managerPermission = await this.prisma.userBusiness.findFirst({
-    where: {
-      userId: managerId,
-      businessId: request.businessId,
-      role: { in: ['manager', 'owner'] },
-    },
-  });
-
-  if (!managerPermission) {
-    throw new BadRequestException(
-      'You do not have permission to respond to overtime requests for this business'
-    );
-  }
-
   const updated = await this.prisma.overtimeRequest.update({
     where: { id: dto.overtimeId },
     data: {
@@ -514,19 +499,9 @@ export class LeaveTrackingService {
   if (!request) {
     throw new NotFoundException('Swap request not found');
   }
-
-  // ✅ FIXED: Check if user is the target of the swap OR a manager/owner
   const isTarget = request.swapWithUserId === userId;
-  
-  const isManager = await this.prisma.userBusiness.findFirst({
-    where: {
-      userId,
-      businessId: request.shift.businessId,
-      role: { in: ['manager', 'owner'] },
-    },
-  });
 
-  if (!isTarget && !isManager) {
+  if (!isTarget) {
     throw new BadRequestException(
       'You do not have permission to respond to this swap request'
     );
@@ -615,3 +590,4 @@ export class LeaveTrackingService {
     }));
   }
 }
+

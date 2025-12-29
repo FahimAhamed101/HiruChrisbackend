@@ -19,9 +19,6 @@ import {
 } from '@nestjs/swagger';
 import { LeaveTrackingService } from './leave-tracking.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { RequirePermissions } from '../auth/decorators/permissions.decorator';
-import { Permission } from '../auth/enums/permissions.enum';
 import {
   GetLeaveHistoryDto,
   RequestLeaveDto,
@@ -37,7 +34,7 @@ import {
 
 @ApiTags('leave-tracking')
 @Controller('leave-tracking')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class LeaveTrackingController {
   constructor(private leaveTrackingService: LeaveTrackingService) {}
@@ -45,7 +42,6 @@ export class LeaveTrackingController {
   // ==================== LEAVE HISTORY ====================
 
   @Get('leave/history')
-  @RequirePermissions(Permission.VIEW_LEAVE_HISTORY)
   @ApiOperation({ 
     summary: 'Get leave history',
     description: 'Returns leave requests with status filters (All, Approved, Pending, Rejected)'
@@ -59,7 +55,6 @@ export class LeaveTrackingController {
   }
 
   @Post('leave/request')
-  @RequirePermissions(Permission.REQUEST_LEAVE)
   @ApiOperation({ 
     summary: 'Request leave',
     description: 'Submit a new leave request with dates, type, and reason'
@@ -74,7 +69,6 @@ export class LeaveTrackingController {
   // ==================== TRACK HOURS ====================
 
   @Get('track-hours')
-  @RequirePermissions(Permission.TRACK_HOURS)
   @ApiOperation({ 
     summary: 'Get track hours overview',
     description: 'Returns monthly overview, daily shift log, and work pattern chart'
@@ -90,7 +84,6 @@ export class LeaveTrackingController {
   // ==================== ATTENDANCE LOG ====================
 
   @Get('attendance')
-  @RequirePermissions(Permission.VIEW_OWN_ATTENDANCE)
   @ApiOperation({ 
     summary: 'Get attendance log',
     description: 'Returns detailed attendance records with clock in/out times and working hours'
@@ -106,7 +99,6 @@ export class LeaveTrackingController {
 
   // For managers/owners to view all attendance
   @Get('attendance/all')
-  @RequirePermissions(Permission.VIEW_ALL_ATTENDANCE)
   @ApiOperation({ 
     summary: 'Get all attendance logs (Manager/Owner only)',
     description: 'Returns attendance for all employees'
@@ -124,7 +116,6 @@ export class LeaveTrackingController {
   // ==================== OVERTIME REQUESTS ====================
 
   @Get('overtime')
-  @RequirePermissions(Permission.VIEW_OVERTIME_REQUESTS)
   @ApiOperation({ 
     summary: 'Get overtime requests',
     description: 'Returns overtime requests (Send Request / Received tabs)'
@@ -138,7 +129,6 @@ export class LeaveTrackingController {
   }
 
   @Post('overtime/request')
-  @RequirePermissions(Permission.REQUEST_OVERTIME)
   @ApiOperation({ 
     summary: 'Create overtime request',
     description: 'Submit a new overtime request'
@@ -150,7 +140,6 @@ export class LeaveTrackingController {
   }
 
   @Post('overtime/respond')
-  @RequirePermissions(Permission.APPROVE_OVERTIME)
   @ApiOperation({ 
     summary: 'Respond to overtime request (Manager/Owner only)',
     description: 'Accept or reject overtime request (Reject/Accept buttons)'
@@ -165,7 +154,6 @@ export class LeaveTrackingController {
   // ==================== SWAP REQUESTS ====================
 
   @Get('swap')
-  @RequirePermissions(Permission.VIEW_SWAP_REQUESTS)
   @ApiOperation({ 
     summary: 'Get swap requests',
     description: 'Returns shift swap requests (Send Request / Received tabs)'
@@ -179,7 +167,6 @@ export class LeaveTrackingController {
   }
 
   @Post('swap/request')
-  @RequirePermissions(Permission.CREATE_SWAP_REQUEST)
   @ApiOperation({ 
     summary: 'Create swap request',
     description: 'Submit a shift swap request'

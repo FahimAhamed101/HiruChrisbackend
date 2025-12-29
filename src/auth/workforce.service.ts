@@ -8,8 +8,6 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import * as fs from 'fs';
 import * as path from 'path';
-import { UserRole } from './enums/roles.enum';
-import { ROLE_PERMISSIONS } from './config/role-permissions.config';
 import {
   CreateBusinessDto,
   SelectBusinessDto,
@@ -23,7 +21,6 @@ import {
   CreateSwapRequestDto,
   CreateTimeOffRequestDto,
 } from './dto/workforce.dto';
-import { CreatePredefinedRoleDto, CreateRoleDto, UpdateRoleDto } from './dto/roles.dto';
 
 @Injectable()
 export class WorkforceService {
@@ -117,7 +114,7 @@ export class WorkforceService {
       isHoliday,
       holidayMessage: isHoliday ? {
         title: "Today is a Holiday",
-        subtitle: "No Shift – It's a Holiday!",
+        subtitle: "No shift — it's a holiday!",
         message: "Enjoy your day off! You've earned it. Come back refreshed and ready.",
         time: "Next shift Tue, 10:00 AM"
       } : null,
@@ -274,7 +271,14 @@ export class WorkforceService {
     const clockedOutCount = todayAttendance.filter(a => a.clockOut).length;
 
     const trendDays = this.buildTrendDays(trendStart, todayEnd);
-    const trendMap = new Map(trendDays.map(day => [day, { date: day, completed: 0, missed: 0 }]));
+    const trendMap = new Map<string, { date: string; completed: number; missed: number }>(
+      trendDays.map(
+        (day): [string, { date: string; completed: number; missed: number }] => [
+          day,
+          { date: day, completed: 0, missed: 0 },
+        ],
+      ),
+    );
     for (const shift of recentShifts) {
       const key = this.formatDateKey(shift.startTime);
       const entry = trendMap.get(key);
@@ -864,408 +868,172 @@ export class WorkforceService {
     };
   }
 
-  // ==================== ROLE MANAGEMENT ====================
+private getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
 
-  async getRoles(userId: string, businessId: string) {
-    const business = await this.getOwnedBusiness(userId, businessId);
-
-    const roles = await this.prisma.role.findMany({
-      where: { businessId: business.id },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    return roles.map(role => ({
-      id: role.id,
-      name: role.name,
-      permissions: role.permissions,
-      isPredefined: role.isPredefined,
-    }));
-  }
-
-  async getRolesCatalog(userId: string, businessId: string) {
-    await this.getOwnedBusiness(userId, businessId);
-
-    const catalog = await this.getRolePermissionsCatalog();
-    return {
-      predefinedRoles: Object.values(UserRole).map((role) => ({
-        id: role,
-        label: role
-          .split('_')
-          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-          .join(' '),
-      })),
-      ...catalog,
-    };
-  }
-
-  private async buildSectionedPermissionsFromRole(role: UserRole) {
-    const catalog = await this.getRolePermissionsCatalog();
-    const permissionToSection = new Map<string, string>();
-
-    for (const section of catalog.sections) {
-      for (const permission of section.permissions) {
-        permissionToSection.set(permission.id, section.id);
-      }
-    }
-
-    const sectioned: Record<string, string[]> = {};
-    const permissions = ROLE_PERMISSIONS[role] || [];
-    for (const permission of permissions) {
-      const sectionId = permissionToSection.get(permission);
-      if (!sectionId) continue;
-      if (!sectioned[sectionId]) sectioned[sectionId] = [];
-      sectioned[sectionId].push(permission);
-    }
-
-    for (const [sectionId, actions] of Object.entries(sectioned)) {
-      sectioned[sectionId] = Array.from(new Set(actions)).sort();
-    }
-
-    return sectioned;
-  }
-
-  async createPredefinedRole(userId: string, dto: CreatePredefinedRoleDto) {
-    const business = await this.getOwnedBusiness(userId, dto.businessId);
-
-    const name = dto.role
-      .split('_')
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(' ');
-
-    const existing = await this.prisma.role.findFirst({
-      where: { businessId: business.id, name },
-    });
-
-    if (existing) {
-      throw new ConflictException('Role with this name already exists');
-    }
-
-    const permissions = await this.buildSectionedPermissionsFromRole(dto.role);
-    await this.validatePermissionsInput(permissions);
-
-    const role = await this.prisma.role.create({
-      data: {
-        businessId: business.id,
-        name,
-        permissions: permissions as any,
-        isPredefined: true,
-      },
-    });
-
-    return {
-      message: 'Role created successfully',
-      role,
-    };
-  }
-
-  private async getRolePermissionsCatalog() {
-    const sections = await this.prisma.permissionSection.findMany({
-      include: {
-        permissions: {
-          orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
-        },
-      },
-      orderBy: [{ sortOrder: 'asc' }, { title: 'asc' }],
-    });
-
-    return {
-      sections: sections.map(section => ({
-        id: section.code,
-        title: section.title,
-        permissions: section.permissions.map(permission => ({
-          id: permission.code,
-          label: permission.label,
-        })),
-      })),
-    };
-  }
-
-  private async getAllowedPermissions() {
-    const catalog = await this.getRolePermissionsCatalog();
-    const allowed = new Map<string, Set<string>>();
-    for (const section of catalog.sections) {
-      allowed.set(
-        section.id,
-        new Set(section.permissions.map(permission => permission.id)),
-      );
-    }
-    return allowed;
-  }
-
-  private normalizePermissionSectionId(sectionId: string) {
-    const map: Record<string, string> = {
-      businessOverview: 'business_overview',
-      peopleManagement: 'people_management',
-      jobManagement: 'job_management',
-      shiftSchedule: 'shift_schedule',
-      leaveManagement: 'leave_management',
-      overtimeManagement: 'overtime_management',
-      swapRequests: 'swap_requests',
-      shiftOperations: 'shift_operations',
-      attendanceHours: 'attendance_hours',
-      businessManagement: 'business_management',
-    };
-    return map[sectionId] || sectionId;
-  }
-
-  private async validatePermissionsInput(permissions?: Record<string, string[]>) {
-    if (!permissions) return;
-    const allowed = await this.getAllowedPermissions();
-    if (allowed.size === 0) {
-      return;
-    }
-
-    for (const [rawSectionId, actions] of Object.entries(permissions)) {
-      const sectionId = this.normalizePermissionSectionId(rawSectionId);
-      const allowedActions = allowed.get(sectionId);
-      if (!allowedActions) {
-        throw new BadRequestException(`Invalid permission section: ${rawSectionId}`);
-      }
-      if (!Array.isArray(actions)) {
-        throw new BadRequestException(`Permissions for ${rawSectionId} must be an array`);
-      }
-      for (const action of actions) {
-        if (!allowedActions.has(action)) {
-          throw new BadRequestException(`Invalid permission: ${rawSectionId}.${action}`);
-        }
-      }
-    }
-  }
-
-  async createRole(userId: string, dto: CreateRoleDto) {
-    const business = await this.getOwnedBusiness(userId, dto.businessId);
-
-    const existing = await this.prisma.role.findFirst({
-      where: { businessId: business.id, name: dto.name },
-    });
-
-    if (existing) {
-      throw new ConflictException('Role with this name already exists');
-    }
-
-    await this.validatePermissionsInput(dto.permissions);
-
-    const role = await this.prisma.role.create({
-      data: {
-        businessId: business.id,
-        name: dto.name,
-        permissions: dto.permissions as any,
-        isPredefined: dto.isPredefined || false,
-      },
-    });
-
-    return {
-      message: 'Role created successfully',
-      role,
-    };
-  }
-
-  async getRole(userId: string, roleId: string) {
-    const role = await this.getOwnedRole(userId, roleId);
-    return {
-      id: role.id,
-      name: role.name,
-      permissions: role.permissions,
-      isPredefined: role.isPredefined,
-    };
-  }
-
-  async updateRole(userId: string, roleId: string, dto: UpdateRoleDto) {
-    const role = await this.getOwnedRole(userId, roleId);
-
-    if (dto.name && dto.name !== role.name) {
-      const existing = await this.prisma.role.findFirst({
-        where: { businessId: role.businessId, name: dto.name },
-      });
-      if (existing) {
-        throw new ConflictException('Role with this name already exists');
-      }
-    }
-
-    await this.validatePermissionsInput(dto.permissions);
-
-    const updated = await this.prisma.role.update({
-      where: { id: role.id },
-      data: {
-        ...(dto.name && { name: dto.name }),
-        ...(dto.permissions && { permissions: dto.permissions as any }),
-      },
-    });
-
-    return {
-      message: 'Role updated successfully',
-      role: updated,
-    };
-  }
-
-  async deleteRole(userId: string, roleId: string) {
-    const role = await this.getOwnedRole(userId, roleId);
-    await this.prisma.role.delete({ where: { id: role.id } });
-    return { message: 'Role deleted successfully' };
-  }
-
-  // ==================== HELPER METHODS ====================
-
-  private formatShift(shift: any) {
-    return {
-      id: shift.id,
-      title: shift.title,
-      startTime: shift.startTime,
-      endTime: shift.endTime,
-      status: shift.status,
-      business: {
-        id: shift.business.id,
-        name: shift.business.name,
-        logo: shift.business.logo,
-      },
-      location: shift.location,
-      hourlyRate: shift.hourlyRate,
-      earnings: shift.hourlyRate && shift.actualHours 
-        ? `$${(shift.hourlyRate * shift.actualHours).toFixed(2)}`
-        : null,
-      attendance: shift.attendance ? {
-        clockIn: shift.attendance.clockIn,
-        clockOut: shift.attendance.clockOut,
-      } : null,
-    };
-  }
-
-  private formatRecentShiftSummary(shifts: any[]) {
-    if (shifts.length === 0) return null;
-
-    const latestShift = shifts[0];
-    const totalHours = shifts.reduce((sum, s) => sum + (s.actualHours || 0), 0);
-    
-    return {
-      date: latestShift.startTime,
-      hours: `${totalHours.toFixed(1)} hours`,
-      rating: 4.5, // Mock rating
-      earnings: latestShift.hourlyRate 
-        ? `$${(latestShift.hourlyRate * (latestShift.actualHours || 0)).toFixed(2)}`
-        : null,
-    };
-  }
-
-  private getGreeting(): string {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 18) return 'Good afternoon';
-    return 'Good evening';
-  }
-
-  private async checkIfHoliday(date: Date): Promise<boolean> {
-    // Implement holiday checking logic
-    // This could check against a holidays table or external API
-    return false;
-  }
-
-  private parseJson(value: string, fieldName: string) {
-    try {
-      return JSON.parse(value);
-    } catch (error) {
-      throw new BadRequestException(`Invalid ${fieldName} JSON`);
-    }
-  }
-
-  private validateUploadedImages(files: Express.Multer.File[]) {
-    if (!files.length) return;
-    const maxBytes = 1 * 1024 * 1024;
-    const invalid = files.find(file => file.size > maxBytes);
-    if (!invalid) return;
-
-    for (const file of files) {
-      const filePath = path.join(process.cwd(), 'uploads', 'businesses', file.filename);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-    }
-
-    throw new BadRequestException('Uploaded images must be 1MB or smaller');
-  }
-
-  private async getOwnedBusiness(userId: string, businessId: string) {
-    const business = await this.prisma.business.findFirst({
-      where: { id: businessId, ownerId: userId },
-    });
-
-    if (!business) {
-      throw new NotFoundException('Business not found');
-    }
-
-    return business;
-  }
-
-  private async getOwnedRole(userId: string, roleId: string) {
-    const role = await this.prisma.role.findUnique({
-      where: { id: roleId },
-    });
-
-    if (!role) {
-      throw new NotFoundException('Role not found');
-    }
-
-    await this.getOwnedBusiness(userId, role.businessId);
-    return role;
-  }
-
-  private formatDateKey(date: Date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  }
-
-  private buildTrendDays(start: Date, end: Date) {
-    const days: string[] = [];
-    const current = new Date(start);
-    current.setHours(0, 0, 0, 0);
-    const last = new Date(end);
-    last.setHours(0, 0, 0, 0);
-    while (current <= last) {
-      days.push(this.formatDateKey(current));
-      current.setDate(current.getDate() + 1);
-    }
-    return days;
-  }
-
-  private buildTopPerformers(shifts: any[], employeeCount: number) {
-    if (!employeeCount) {
-      return [];
-    }
-    const totals = new Map<string, { user: any; hours: number }>();
-    for (const shift of shifts) {
-      if (!shift.user || !shift.actualHours) continue;
-      const existing = totals.get(shift.userId) || { user: shift.user, hours: 0 };
-      existing.hours += shift.actualHours;
-      totals.set(shift.userId, existing);
-    }
-    return Array.from(totals.values())
-      .sort((a, b) => b.hours - a.hours)
-      .slice(0, 3)
-      .map((entry, index) => ({
-        rank: index + 1,
-        userId: entry.user.id,
-        name: entry.user.fullName,
-        profileImage: entry.user.profileImage,
-        hours: Math.round(entry.hours * 10) / 10,
-      }));
-  }
-
- private async calculateProfileCompletion(userId: string): Promise<number> {
-  const user = await this.prisma.user.findUnique({
-    where: { id: userId },
-    include: { profile: true },
+private async calculateProfileCompletion(userId: string): Promise<number> {
+  const profile = await this.prisma.profile.findUnique({
+    where: { userId },
+    select: { profileProgress: true },
   });
 
-  let completion = 0;
-  const totalFields = 5; // Update this based on how many fields you want to check
-  
-  if (user?.fullName) completion += 20;
-  if (user?.email && user?.isVerified) completion += 20;
-  if (user?.profileImage) completion += 20;
-  if (user?.profile?.bio) completion += 20;
-  // Remove or adjust the dateOfBirth check if you don't have that field
-  
-  return completion;
+  return profile?.profileProgress ?? 0;
+}
+
+private async checkIfHoliday(date: Date): Promise<boolean> {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+
+  const holiday = await this.prisma.holiday.findFirst({
+    where: {
+      date: {
+        gte: start,
+        lt: end,
+      },
+    },
+    select: { id: true },
+  });
+
+  return Boolean(holiday);
+}
+
+private formatShift(shift: any) {
+  const hourlyRate = typeof shift?.hourlyRate === 'number' ? shift.hourlyRate : null;
+  const actualHours = typeof shift?.actualHours === 'number' ? shift.actualHours : null;
+
+  return {
+    id: shift?.id,
+    title: shift?.title,
+    startTime: shift?.startTime,
+    endTime: shift?.endTime,
+    status: shift?.status,
+    business: shift?.business
+      ? {
+          id: shift.business.id,
+          name: shift.business.name,
+          logo: shift.business.logo,
+        }
+      : undefined,
+    location: shift?.location ?? null,
+    hourlyRate,
+    actualHours,
+    earnings:
+      hourlyRate !== null && actualHours !== null
+        ? `$${(hourlyRate * actualHours).toFixed(2)}`
+        : null,
+    attendance: shift?.attendance
+      ? {
+          clockIn: shift.attendance.clockIn,
+          clockOut: shift.attendance.clockOut,
+        }
+      : null,
+  };
+}
+
+private formatRecentShiftSummary(shifts: any[]) {
+  if (!Array.isArray(shifts) || shifts.length === 0) return null;
+
+  const totalHours = shifts.reduce((sum, shift) => {
+    const hours = typeof shift?.actualHours === 'number' ? shift.actualHours : 0;
+    return sum + hours;
+  }, 0);
+
+  const latestShift = shifts[0];
+  const hourlyRate =
+    latestShift && typeof latestShift.hourlyRate === 'number'
+      ? latestShift.hourlyRate
+      : null;
+  const latestHours =
+    latestShift && typeof latestShift.actualHours === 'number'
+      ? latestShift.actualHours
+      : null;
+
+  return {
+    date: latestShift?.startTime ?? null,
+    hours: `${totalHours.toFixed(1)} hours`,
+    rating: 4.5,
+    earnings:
+      hourlyRate !== null && latestHours !== null
+        ? `$${(hourlyRate * latestHours).toFixed(2)}`
+        : null,
+  };
+}
+
+private formatDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+private buildTrendDays(start: Date, end: Date) {
+  const days: string[] = [];
+  const current = new Date(start);
+  current.setHours(0, 0, 0, 0);
+  const last = new Date(end);
+  last.setHours(0, 0, 0, 0);
+
+  while (current <= last) {
+    days.push(this.formatDateKey(current));
+    current.setDate(current.getDate() + 1);
+  }
+
+  return days;
+}
+
+private buildTopPerformers(shifts: any[], employeeCount: number) {
+  if (!employeeCount || !Array.isArray(shifts) || shifts.length === 0) {
+    return [];
+  }
+
+  const totals = new Map<string, { user: any; hours: number }>();
+  for (const shift of shifts) {
+    if (!shift?.userId || !shift?.user) continue;
+    const hours = typeof shift.actualHours === 'number' ? shift.actualHours : 0;
+    if (hours <= 0) continue;
+
+    const existing = totals.get(shift.userId) || { user: shift.user, hours: 0 };
+    existing.hours += hours;
+    totals.set(shift.userId, existing);
+  }
+
+  return Array.from(totals.entries())
+    .sort((a, b) => b[1].hours - a[1].hours)
+    .slice(0, 3)
+    .map(([userId, data], index) => ({
+      rank: index + 1,
+      userId,
+      name: data.user?.fullName ?? null,
+      profileImage: data.user?.profileImage ?? null,
+      hours: Math.round(data.hours * 10) / 10,
+    }));
+}
+
+private validateUploadedImages(files: Express.Multer.File[]) {
+  const maxBytes = 5 * 1024 * 1024; // 5MB
+
+  for (const file of files) {
+    if (!file) continue;
+    if (file.size > maxBytes) {
+      throw new BadRequestException('Uploaded images must be 5MB or smaller');
+    }
+    if (!file.mimetype?.match(/\/(jpg|jpeg|png|gif)$/)) {
+      throw new BadRequestException('Only image files are allowed');
+    }
+  }
+}
+
+private parseJson(value: string, fieldName: string) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new BadRequestException(`Invalid JSON for ${fieldName}`);
+  }
 }
 }
