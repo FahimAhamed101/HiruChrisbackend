@@ -694,7 +694,7 @@ export class ScheduleTemplateService {
     const employees = await this.prisma.userBusiness.findMany({
       where: {
         businessId: dto.businessId,
-        role: { not: 'owner' },
+        NOT: [{ role: { equals: 'owner', mode: 'insensitive' } }],
       },
       include: {
         user: {
@@ -707,7 +707,13 @@ export class ScheduleTemplateService {
       },
     });
 
-    // Get their shifts for the date if provided
+      const typedEmployees = employees as Array<{
+        userId: string;
+        role: string | null;
+        user: { id: string; fullName: string | null; profileImage: string | null };
+      }>;
+
+      // Get their shifts for the date if provided
     let shiftsOnDate: Array<{ userId: string }> = [];
     if (dto.date) {
       const targetDate = new Date(dto.date);

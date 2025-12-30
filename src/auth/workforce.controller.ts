@@ -22,6 +22,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
   ApiQuery,
+  ApiParam,
   ApiConsumes,
   ApiBody,
 } from '@nestjs/swagger';
@@ -40,6 +41,7 @@ import {
   WorkforceCreateSwapRequestDto,
   CreateTimeOffRequestDto,
 } from './dto/workforce.dto';
+import { UpdateRolePermissionsDto } from './dto/roles.dto';
 
 @ApiTags('workforce')
 @Controller('workforce')
@@ -131,6 +133,22 @@ export class WorkforceController {
   @ApiResponse({ status: 200, description: 'Businesses selected successfully' })
   async selectBusinesses(@Request() req, @Body() dto: SelectBusinessDto) {
     return this.workforceService.selectBusinesses(req.user.id, dto);
+  }
+
+  // ==================== ROLE PERMISSIONS ====================
+
+  @Put('roles/:id/permissions')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update role permissions (owner only)' })
+  @ApiResponse({ status: 200, description: 'Role permissions updated successfully' })
+  @ApiResponse({ status: 404, description: 'Role not found' })
+  @ApiParam({ name: 'id', description: 'Role ID or name' })
+  async updateRolePermissions(
+    @Request() req,
+    @Param('id') roleId: string,
+    @Body() dto: UpdateRolePermissionsDto,
+  ) {
+    return this.workforceService.updateRolePermissions(req.user.id, roleId, dto);
   }
 
   // ==================== SHIFT MANAGEMENT ====================

@@ -330,7 +330,7 @@ export class ColleaguesJobService {
       where: {
         userId,
         businessId: dto.businessId,
-        role: { in: ['owner', 'manager'] },
+        OR: [{ role: { equals: 'owner', mode: 'insensitive' } }, { role: { equals: 'manager', mode: 'insensitive' } }],
       },
     });
 

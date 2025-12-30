@@ -21,6 +21,8 @@ import {
   WorkforceCreateSwapRequestDto,
   CreateTimeOffRequestDto,
 } from './dto/workforce.dto';
+import { UpdateRolePermissionsDto } from './dto/roles.dto';
+import { UserRole } from './enums/roles.enum';
 
 @Injectable()
 export class WorkforceService {
@@ -573,6 +575,59 @@ export class WorkforceService {
     };
   }
 
+  // ==================== ROLE PERMISSIONS ====================
+
+  async updateRolePermissions(
+    userId: string,
+    roleIdentifier: string,
+    dto: UpdateRolePermissionsDto,
+  ) {
+    let role = await this.prisma.role.findUnique({
+      where: { id: roleIdentifier },
+    });
+
+    if (!role && dto.businessId) {
+      const normalized = this.normalizeRoleCode(roleIdentifier);
+      const candidates = new Set<string>([
+        roleIdentifier,
+        this.formatCustomRoleName(roleIdentifier),
+      ]);
+
+      if (Object.values(UserRole).includes(normalized as UserRole)) {
+        candidates.add(this.formatRoleName(normalized as UserRole));
+      }
+
+      role = await this.prisma.role.findFirst({
+        where: {
+          businessId: dto.businessId,
+          name: { in: Array.from(candidates), mode: 'insensitive' },
+        },
+      });
+    }
+
+    if (!role) {
+      throw new NotFoundException('Role not found');
+    }
+
+    await this.getOwnedBusiness(userId, role.businessId);
+    await this.validatePermissionsInput(dto.permissions);
+
+    const updated = await this.prisma.role.update({
+      where: { id: role.id },
+      data: { permissions: dto.permissions as any },
+    });
+
+    return {
+      message: 'Role permissions updated successfully',
+      role: {
+        id: updated.id,
+        name: updated.name,
+        permissions: updated.permissions,
+        isPredefined: updated.isPredefined,
+      },
+    };
+  }
+
   // ==================== SHIFT MANAGEMENT ====================
 
   async createShift(userId: string, dto: CreateShiftDto) {
@@ -1015,7 +1070,135 @@ private buildTopPerformers(shifts: any[], employeeCount: number) {
     }));
 }
 
-private validateUploadedImages(files: Express.Multer.File[]) {
+  private formatRoleName(role: UserRole): string {
+    const displayNames: Record<UserRole, string> = {
+      [UserRole.OWNER]: 'Owner',
+      [UserRole.MANAGER]: 'Manager',
+      [UserRole.EMPLOYEE]: 'Employee',
+      [UserRole.HR_RECRUITER]: 'HR / Recruiter',
+      [UserRole.SHIFT_SUPERVISOR]: 'Shift Supervisor',
+      [UserRole.AUDITOR]: 'Auditor',
+      [UserRole.TRAINER]: 'Trainer',
+    };
+
+    return displayNames[role] || role;
+  }
+
+  private normalizeRoleCode(role: string): string {
+    return role
+      .trim()
+      .replace(/[^a-zA-Z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .toUpperCase();
+  }
+
+  private formatCustomRoleName(role: string): string {
+    const trimmed = role.trim();
+    if (!trimmed) return trimmed;
+
+    if (/[A-Z]/.test(trimmed)) {
+      return trimmed;
+    }
+
+    return trimmed
+      .split(/[_\-\s]+/)
+      .filter(Boolean)
+      .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+      .join(' ');
+  }
+
+  private async getRolePermissionsCatalog() {
+    const sections = await this.prisma.permissionSection.findMany({
+      include: {
+        permissions: {
+          orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+        },
+      },
+      orderBy: [{ sortOrder: 'asc' }, { title: 'asc' }],
+    });
+
+    return {
+      sections: sections.map(section => ({
+        id: section.code,
+        title: section.title,
+        permissions: section.permissions.map(permission => ({
+          id: permission.code,
+          label: permission.label,
+        })),
+      })),
+    };
+  }
+
+  private async validatePermissionsInput(
+    permissions?: Record<string, Record<string, boolean>>,
+  ) {
+    if (!permissions) return;
+
+    const catalog = await this.getRolePermissionsCatalog();
+    const allowedSections = new Map<string, Set<string>>();
+
+    for (const section of catalog.sections) {
+      allowedSections.set(
+        section.id,
+        new Set(section.permissions.map(p => p.id)),
+      );
+    }
+
+    for (const [sectionId, sectionPerms] of Object.entries(permissions)) {
+      const normalizedSectionId = this.normalizeSectionId(sectionId);
+      const allowedPerms = allowedSections.get(normalizedSectionId);
+
+      if (!allowedPerms) {
+        throw new BadRequestException(`Invalid permission section: ${sectionId}`);
+      }
+
+      for (const [permCode, enabled] of Object.entries(sectionPerms)) {
+        if (typeof enabled !== 'boolean') {
+          throw new BadRequestException(
+            `Permission value must be boolean for ${sectionId}.${permCode}`,
+          );
+        }
+
+        if (!allowedPerms.has(permCode)) {
+          throw new BadRequestException(
+            `Invalid permission: ${sectionId}.${permCode}`,
+          );
+        }
+      }
+    }
+  }
+
+  private normalizeSectionId(sectionId: string): string {
+    const map: Record<string, string> = {
+      businessOverview: 'business_overview',
+      peopleManagement: 'people_management',
+      jobManagement: 'job_management',
+      shiftSchedule: 'shift_schedule',
+      leaveManagement: 'leave_management',
+      overtimeManagement: 'overtime_management',
+      swapRequests: 'swap_requests',
+      shiftOperations: 'shift_operations',
+      attendanceHours: 'attendance_hours',
+      businessManagement: 'business_management',
+    };
+    return map[sectionId] || sectionId;
+  }
+
+  private async getOwnedBusiness(userId: string, businessId: string) {
+    const business = await this.prisma.business.findFirst({
+      where: { id: businessId, ownerId: userId },
+    });
+
+    if (!business) {
+      throw new NotFoundException(
+        'Business not found or you do not have permission',
+      );
+    }
+
+    return business;
+  }
+
+  private validateUploadedImages(files: Express.Multer.File[]) {
   const maxBytes = 5 * 1024 * 1024; // 5MB
 
   for (const file of files) {
@@ -1027,13 +1210,13 @@ private validateUploadedImages(files: Express.Multer.File[]) {
       throw new BadRequestException('Only image files are allowed');
     }
   }
-}
+  }
 
-private parseJson(value: string, fieldName: string) {
+  private parseJson(value: string, fieldName: string) {
   try {
     return JSON.parse(value);
   } catch {
     throw new BadRequestException(`Invalid JSON for ${fieldName}`);
   }
-}
+  }
 }

@@ -1,0 +1,77 @@
+export enum UserRole {
+  OWNER = 'OWNER',
+  MANAGER = 'MANAGER',
+  EMPLOYEE = 'EMPLOYEE',
+  HR_RECRUITER = 'HR_RECRUITER',
+  SHIFT_SUPERVISOR = 'SHIFT_SUPERVISOR',
+  AUDITOR = 'AUDITOR',
+  TRAINER = 'TRAINER',
+}
+
+const EMPLOYEE_PERMISSIONS = [
+  'view_schedule',
+  'view_own_shifts',
+  'clock_in_out',
+  'request_leave',
+  'request_overtime',
+  'create_swap_request',
+  'view_own_attendance',
+  'track_hours',
+  'report_shift_issues',
+  'submit_shift_summary',
+];
+
+const MANAGER_PERMISSIONS = [
+  ...EMPLOYEE_PERMISSIONS,
+  'view_business_overview',
+  'edit_business_overview',
+  'view_business_summary',
+  'view_business_statistics',
+  'view_user_statistics',
+  'manage_people',
+  'accept_reject_join_requests',
+  'manage_team_members',
+  'view_employee_profiles',
+  'edit_employee_profiles',
+  'handle_onboarding',
+  'report_assistance_issues',
+  'manage_jobs',
+  'post_jobs',
+  'view_jobs',
+  'edit_jobs',
+  'delete_jobs',
+  'view_job_applications',
+  'manage_schedule',
+  'create_schedule',
+  'edit_schedule',
+  'create_edit_schedule_templates',
+  'mark_late_missed_attendance',
+  'create_remove_holidays',
+  'view_all_shifts',
+  'create_shifts',
+  'assign_shifts',
+  'approve_leave',
+  'view_leave_history',
+  'approve_overtime',
+  'view_overtime_requests',
+  'approve_swap_request',
+  'view_swap_requests',
+  'view_all_attendance',
+];
+
+const OWNER_PERMISSIONS = [
+  ...MANAGER_PERMISSIONS,
+  'create_business',
+  'edit_business',
+  'delete_business',
+];
+
+export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
+  [UserRole.OWNER]: OWNER_PERMISSIONS,
+  [UserRole.MANAGER]: MANAGER_PERMISSIONS,
+  [UserRole.EMPLOYEE]: EMPLOYEE_PERMISSIONS,
+  [UserRole.HR_RECRUITER]: EMPLOYEE_PERMISSIONS,
+  [UserRole.SHIFT_SUPERVISOR]: EMPLOYEE_PERMISSIONS,
+  [UserRole.AUDITOR]: EMPLOYEE_PERMISSIONS,
+  [UserRole.TRAINER]: EMPLOYEE_PERMISSIONS,
+};
