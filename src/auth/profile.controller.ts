@@ -15,6 +15,7 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor, FileFieldsInterceptor } from '@nestjs/platform-express';
 import {
@@ -26,6 +27,8 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { ProfileService } from './profile.service';
+import { WorkforceService } from './workforce.service';
+import { BusinessType, CreateBusinessDto } from './dto/workforce.dto';
 import { UpdateProfileDto, AddCompanyManuallyDto } from './dto/update-profile.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -34,7 +37,10 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class ProfileController {
-  constructor(private profileService: ProfileService) {}
+  constructor(
+    private profileService: ProfileService,
+    private workforceService: WorkforceService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Get current user profile' })
@@ -47,10 +53,59 @@ export class ProfileController {
   @Put()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Update user profile' })
+  @ApiConsumes('multipart/form-data')
   @ApiResponse({ status: 200, description: 'Profile updated successfully' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  @ApiBody({ type: UpdateProfileDto })
-  async updateProfile(@Request() req, @Body() updateProfileDto: UpdateProfileDto) {
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        photo: { type: 'string', format: 'binary' },
+        fullName: { type: 'string' },
+        dateOfBirth: { type: 'string', format: 'date' },
+        gender: { type: 'string', enum: ['male', 'female', 'other'] },
+        bio: { type: 'string' },
+        location: { type: 'string', description: 'JSON string' },
+        socialMedia: { type: 'string', description: 'JSON array string' },
+        companies: { type: 'string', description: 'JSON array string' },
+        interests: { type: 'string', description: 'JSON array string' },
+        profileProgress: { type: 'number' },
+      },
+    },
+  })
+  @UseInterceptors(FileInterceptor('photo'))
+  async updateProfile(
+    @Request() req,
+    @Body() formData: any,
+    @UploadedFile() photo?: Express.Multer.File,
+  ) {
+    if (photo) {
+      await this.profileService.uploadProfilePhoto(req.user.id, photo);
+    }
+
+    const updateProfileDto: UpdateProfileDto = {
+      fullName: formData.fullName,
+      dateOfBirth: formData.dateOfBirth,
+      gender: formData.gender,
+      bio: formData.bio,
+      location: formData.location
+        ? this.parseJson(formData.location, 'location')
+        : undefined,
+      socialMedia: formData.socialMedia
+        ? this.parseJson(formData.socialMedia, 'socialMedia')
+        : undefined,
+      companies: formData.companies
+        ? this.parseJson(formData.companies, 'companies')
+        : undefined,
+      interests: formData.interests
+        ? this.parseJson(formData.interests, 'interests')
+        : undefined,
+      profileProgress:
+        formData.profileProgress !== undefined
+          ? Number(formData.profileProgress)
+          : undefined,
+    };
+
     return this.profileService.updateProfile(req.user.id, updateProfileDto);
   }
 
@@ -115,22 +170,25 @@ export class ProfileController {
   }
 
   @Post('company')
-  @ApiOperation({ summary: 'Add company/employer' })
   @ApiConsumes('multipart/form-data')
-  @ApiResponse({ status: 201, description: 'Company added successfully' })
+  @ApiOperation({ summary: 'Create business profile' })
+  @ApiResponse({ status: 201, description: 'Business created successfully' })
   @ApiBody({
     schema: {
       type: 'object',
       properties: {
         profilePhoto: { type: 'string', format: 'binary' },
         coverPhoto: { type: 'string', format: 'binary' },
-        name: { type: 'string', example: 'Ferozi Beach Club' },
-        companyName: { type: 'string', example: 'Ferozi Beach Club' },
-        businessName: { type: 'string', example: 'Ferozi Beach Club' },
-        startDate: { type: 'string', format: 'date', example: '2020-01-01' },
-        endDate: { type: 'string', format: 'date', example: '2023-12-31' },
-        jobTitle: { type: 'string', example: 'Software Engineer' },
-        isCurrentlyWorking: { type: 'boolean', example: true },
+        businessName: { type: 'string', description: 'Business name (alias for name)' },
+        name: { type: 'string' },
+        type: { type: 'string', enum: ['hotel', 'restaurant', 'bar', 'retail', 'other'] },
+        phoneNumber: { type: 'string' },
+        address: { type: 'string' },
+        about: { type: 'string', description: 'Business description (alias for description)' },
+        description: { type: 'string' },
+        location: { type: 'string', description: 'JSON string' },
+        socialMedia: { type: 'string', description: 'JSON array string' },
+        logo: { type: 'string', description: 'Optional logo URL' },
       },
       required: ['name'],
     },
@@ -141,16 +199,39 @@ export class ProfileController {
       { name: 'coverPhoto', maxCount: 1 },
     ]),
   )
-  async addCompany(
+  async createBusinessProfile(
     @Request() req,
-    @Body() companyData: any,
+    @Body() formData: any,
     @UploadedFiles()
     files?: {
       profilePhoto?: Express.Multer.File[];
       coverPhoto?: Express.Multer.File[];
     },
   ) {
-    return this.profileService.addCompany(req.user.id, companyData);
+    const rawName =
+      formData.businessName || formData.name || formData.companyName || '';
+    const name = String(rawName).trim();
+    const rawType = String(formData.type || '').trim();
+    const type = (Object.values(BusinessType).includes(rawType as BusinessType)
+      ? rawType
+      : BusinessType.OTHER) as BusinessType;
+
+    const dto: CreateBusinessDto = {
+      name,
+      type,
+      phoneNumber: formData.phoneNumber,
+      address: formData.address,
+      description: formData.about || formData.description,
+      location: formData.location,
+      socialMedia: formData.socialMedia,
+      logo: formData.logo,
+    };
+
+    if (!dto.name) {
+      throw new BadRequestException('Business name is required');
+    }
+
+    return this.workforceService.createBusiness(req.user.id, dto, files);
   }
 
   @Delete('company/:id')
@@ -209,5 +290,13 @@ export class ProfileController {
   @ApiResponse({ status: 200, description: 'Progress calculated successfully' })
   async getProgress(@Request() req) {
     return this.profileService.calculateProfileProgress(req.user.id);
+  }
+
+  private parseJson(value: string, fieldName: string) {
+    try {
+      return JSON.parse(value);
+    } catch {
+      throw new BadRequestException(`Invalid JSON for ${fieldName}`);
+    }
   }
 }

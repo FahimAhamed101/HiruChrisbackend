@@ -5,13 +5,17 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CoinService } from './coin.service';
 import { UpdateProfileDto, AddCompanyManuallyDto } from './dto/update-profile.dto';
 import * as fs from 'fs';
 import * as path from 'path';
 
 @Injectable()
 export class ProfileService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private coinService: CoinService,
+  ) {}
 
 async getProfile(userId: string) {
   const user = await this.prisma.user.findUnique({
@@ -30,6 +34,8 @@ async getProfile(userId: string) {
     throw new NotFoundException('User not found');
   }
 
+  const coinBalance = await this.coinService.getCoinBalance(userId);
+
   return {
     id: user.id,
     email: user.email,
@@ -38,6 +44,7 @@ async getProfile(userId: string) {
     isVerified: user.isVerified,
     profileImage: user.profileImage,
     profile: user.profile, // Use lowercase 'profile' here
+    coinBalance: coinBalance.balance,
   };
 }
 
@@ -50,11 +57,25 @@ async getProfile(userId: string) {
       throw new NotFoundException('User not found');
     }
 
+    const normalized: UpdateProfileDto = { ...updateProfileDto };
+    if (typeof normalized.location === 'string') {
+      normalized.location = this.parseJson(normalized.location, 'location');
+    }
+    if (typeof normalized.socialMedia === 'string') {
+      normalized.socialMedia = this.parseJson(normalized.socialMedia, 'socialMedia');
+    }
+    if (typeof normalized.companies === 'string') {
+      normalized.companies = this.parseJson(normalized.companies, 'companies');
+    }
+    if (typeof normalized.interests === 'string') {
+      normalized.interests = this.parseJson(normalized.interests, 'interests');
+    }
+
     // Update user basic info if provided
-    if (updateProfileDto.fullName) {
+    if (normalized.fullName) {
       await this.prisma.user.update({
         where: { id: userId },
-        data: { fullName: updateProfileDto.fullName },
+        data: { fullName: normalized.fullName },
       });
     }
 
@@ -68,39 +89,39 @@ async getProfile(userId: string) {
       profile = await this.prisma.profile.create({
         data: {
           userId,
-          dateOfBirth: updateProfileDto.dateOfBirth,
-          gender: updateProfileDto.gender,
-          bio: updateProfileDto.bio,
-          location: updateProfileDto.location as any,
-          interests: updateProfileDto.interests || [],
-          profileProgress: updateProfileDto.profileProgress || 0,
+          dateOfBirth: normalized.dateOfBirth,
+          gender: normalized.gender,
+          bio: normalized.bio,
+          location: normalized.location as any,
+          interests: normalized.interests || [],
+          profileProgress: normalized.profileProgress || 0,
         },
       });
     } else {
       profile = await this.prisma.profile.update({
         where: { userId },
         data: {
-          ...(updateProfileDto.dateOfBirth && { dateOfBirth: updateProfileDto.dateOfBirth }),
-          ...(updateProfileDto.gender && { gender: updateProfileDto.gender }),
-          ...(updateProfileDto.bio && { bio: updateProfileDto.bio }),
-          ...(updateProfileDto.location && { location: updateProfileDto.location as any }),
-          ...(updateProfileDto.interests && { interests: updateProfileDto.interests }),
-          ...(updateProfileDto.profileProgress !== undefined && { profileProgress: updateProfileDto.profileProgress }),
+          ...(normalized.dateOfBirth && { dateOfBirth: normalized.dateOfBirth }),
+          ...(normalized.gender && { gender: normalized.gender }),
+          ...(normalized.bio && { bio: normalized.bio }),
+          ...(normalized.location && { location: normalized.location as any }),
+          ...(normalized.interests && { interests: normalized.interests }),
+          ...(normalized.profileProgress !== undefined && { profileProgress: normalized.profileProgress }),
         },
       });
     }
 
     // Handle social media
-    if (updateProfileDto.socialMedia) {
+    if (normalized.socialMedia) {
       // Delete existing social media entries
       await this.prisma.socialMedia.deleteMany({
         where: { profileId: profile.id },
       });
 
       // Create new social media entries
-      if (updateProfileDto.socialMedia.length > 0) {
+      if (normalized.socialMedia.length > 0) {
         await this.prisma.socialMedia.createMany({
-          data: updateProfileDto.socialMedia.map(sm => ({
+          data: normalized.socialMedia.map(sm => ({
             profileId: profile.id,
             platform: sm.platform,
             username: sm.username,
@@ -113,16 +134,16 @@ async getProfile(userId: string) {
     }
 
     // Handle companies
-    if (updateProfileDto.companies) {
+    if (normalized.companies) {
       // Delete existing company entries
       await this.prisma.company.deleteMany({
         where: { profileId: profile.id },
       });
 
       // Create new company entries
-      if (updateProfileDto.companies.length > 0) {
+      if (normalized.companies.length > 0) {
         await this.prisma.company.createMany({
-          data: updateProfileDto.companies.map(company => ({
+          data: normalized.companies.map(company => ({
             profileId: profile.id,
             name: company.name,
             startDate: company.startDate ? new Date(company.startDate) : null,
@@ -139,9 +160,7 @@ async getProfile(userId: string) {
     
     // If profile is 100% complete, trigger coin reward check
     if (progressResult.progress === 100) {
-      // Note: This would typically be done via event system or queue
-      // For now, we'll just log it. The user can claim via the coins API
-      console.log(`User ${userId} has completed profile 100% - eligible for 5 coins reward`);
+      await this.coinService.checkAndRewardProfileCompletion(userId);
     }
 
     return this.getProfile(userId);

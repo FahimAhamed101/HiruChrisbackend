@@ -505,8 +505,12 @@ export class WorkforceService {
     const profilePhoto = files?.profilePhoto?.[0];
     const coverPhoto = files?.coverPhoto?.[0];
     this.validateUploadedImages([profilePhoto, coverPhoto].filter(Boolean) as Express.Multer.File[]);
-    const profileImage = profilePhoto ? `/uploads/businesses/${profilePhoto.filename}` : undefined;
-    const coverImage = coverPhoto ? `/uploads/businesses/${coverPhoto.filename}` : undefined;
+    const profileImage = profilePhoto?.filename
+      ? `/uploads/businesses/${profilePhoto.filename}`
+      : undefined;
+    const coverImage = coverPhoto?.filename
+      ? `/uploads/businesses/${coverPhoto.filename}`
+      : undefined;
     const location = dto.location ? this.parseJson(dto.location, 'location') : undefined;
     const socialMedia = dto.socialMedia ? this.parseJson(dto.socialMedia, 'socialMedia') : undefined;
     const logo = dto.logo || profileImage;
@@ -532,6 +536,7 @@ export class WorkforceService {
       data: {
         userId,
         businessId: business.id,
+        role: 'owner',
         isSelected: true,
       },
     });
@@ -539,6 +544,7 @@ export class WorkforceService {
     return {
       message: 'Business created successfully',
       business,
+      role: 'owner',
     };
   }
 
