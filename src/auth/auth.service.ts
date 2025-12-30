@@ -66,6 +66,8 @@ export class AuthService {
     // Generate tokens (optional - depends on whether you want to login immediately)
     const tokens = await this.generateTokens(user.id);
 
+    const roleSnapshot = await this.getUserRoleSnapshot(user.id);
+
     return {
       message: 'Account created successfully. Please verify your email/phone with OTP.',
       user: {
@@ -74,6 +76,10 @@ export class AuthService {
         phoneNumber: user.phoneNumber,
         fullName: user.fullName,
         isVerified: user.isVerified,
+        role: roleSnapshot.role,
+        businessId: roleSnapshot.businessId,
+        businessName: roleSnapshot.businessName,
+        roles: roleSnapshot.roles,
       },
       ...tokens,
     };
@@ -125,6 +131,8 @@ export class AuthService {
       });
     }
 
+    const roleSnapshot = await this.getUserRoleSnapshot(user.id);
+
     return {
       message: 'Login successful',
       user: {
@@ -133,6 +141,10 @@ export class AuthService {
         phoneNumber: user.phoneNumber,
         fullName: user.fullName,
         isVerified: user.isVerified,
+        role: roleSnapshot.role,
+        businessId: roleSnapshot.businessId,
+        businessName: roleSnapshot.businessName,
+        roles: roleSnapshot.roles,
       },
       ...tokens,
     };
@@ -208,6 +220,8 @@ export class AuthService {
     // Generate tokens
     const tokens = await this.generateTokens(user.id);
 
+    const roleSnapshot = await this.getUserRoleSnapshot(user.id);
+
     return {
       message: 'Login successful',
       user: {
@@ -216,6 +230,10 @@ export class AuthService {
         phoneNumber: user.phoneNumber,
         fullName: user.fullName,
         isVerified: user.isVerified,
+        role: roleSnapshot.role,
+        businessId: roleSnapshot.businessId,
+        businessName: roleSnapshot.businessName,
+        roles: roleSnapshot.roles,
       },
       ...tokens,
     };
@@ -258,6 +276,8 @@ export class AuthService {
     // Generate tokens after verification
     const tokens = await this.generateTokens(user.id);
 
+    const roleSnapshot = await this.getUserRoleSnapshot(updatedUser.id);
+
     return {
       message: 'Account verified successfully',
       user: {
@@ -266,6 +286,10 @@ export class AuthService {
         phoneNumber: updatedUser.phoneNumber,
         fullName: updatedUser.fullName,
         isVerified: updatedUser.isVerified,
+        role: roleSnapshot.role,
+        businessId: roleSnapshot.businessId,
+        businessName: roleSnapshot.businessName,
+        roles: roleSnapshot.roles,
       },
       ...tokens,
     };
@@ -428,6 +452,40 @@ export class AuthService {
     );
 
     return { accessToken, refreshToken };
+  }
+
+  private async getUserRoleSnapshot(userId: string) {
+    const userBusinesses = await this.prisma.userBusiness.findMany({
+      where: { userId },
+      include: {
+        business: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const selected =
+      userBusinesses.find(entry => entry.isSelected) || userBusinesses[0];
+
+    if (userBusinesses.length === 0) {
+      return {
+        role: 'employee',
+        businessId: null,
+        businessName: null,
+        roles: [],
+      };
+    }
+
+    return {
+      role: selected?.role ?? 'employee',
+      businessId: selected?.businessId ?? null,
+      businessName: selected?.business?.name ?? null,
+      roles: userBusinesses.map(entry => ({
+        businessId: entry.businessId,
+        businessName: entry.business?.name ?? null,
+        role: entry.role ?? null,
+        isSelected: entry.isSelected,
+      })),
+    };
   }
 
   private async sendVerificationOtp(user: any) {
