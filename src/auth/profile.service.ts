@@ -297,18 +297,93 @@ async getProfile(userId: string) {
   }
 
   async addCompany(userId: string, companyData: any) {
-    const profile = await this.prisma.profile.findUnique({
+    const name =
+      companyData?.name ||
+      companyData?.companyName ||
+      companyData?.businessName;
+
+    if (!name) {
+      throw new BadRequestException('Company name is required');
+    }
+
+    let profile = await this.prisma.profile.findUnique({
       where: { userId },
     });
 
     if (!profile) {
-      throw new NotFoundException('Profile not found');
+      profile = await this.prisma.profile.create({
+        data: {
+          userId,
+          interests: [],
+          profileProgress: 0,
+        },
+      });
+    }
+
+    if (companyData?.phoneNumber) {
+      const existing = await this.prisma.user.findFirst({
+        where: {
+          phoneNumber: companyData.phoneNumber,
+          id: { not: userId },
+        },
+      });
+      if (existing) {
+        throw new BadRequestException('Phone number is already in use');
+      }
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { phoneNumber: companyData.phoneNumber },
+      });
+    }
+
+    if (companyData?.about) {
+      await this.prisma.profile.update({
+        where: { id: profile.id },
+        data: { bio: companyData.about },
+      });
+    }
+
+    if (companyData?.location) {
+      const location =
+        typeof companyData.location === 'string'
+          ? this.parseJson(companyData.location, 'location')
+          : companyData.location;
+      await this.prisma.profile.update({
+        where: { id: profile.id },
+        data: { location: location as any },
+      });
+    }
+
+    if (companyData?.socialMedia) {
+      const socialMedia =
+        typeof companyData.socialMedia === 'string'
+          ? this.parseJson(companyData.socialMedia, 'socialMedia')
+          : companyData.socialMedia;
+
+      if (Array.isArray(socialMedia)) {
+        await this.prisma.socialMedia.deleteMany({
+          where: { profileId: profile.id },
+        });
+
+        if (socialMedia.length > 0) {
+          await this.prisma.socialMedia.createMany({
+            data: socialMedia.map((sm: any) => ({
+              profileId: profile.id,
+              platform: sm.platform,
+              username: sm.username,
+              profileHandle: sm.profileHandle ?? sm.profileId,
+              phoneNumber: sm.phoneNumber,
+              url: sm.url,
+            })),
+          });
+        }
+      }
     }
 
     const company = await this.prisma.company.create({
       data: {
         profileId: profile.id,
-        name: companyData.name,
+        name,
         startDate: companyData.startDate ? new Date(companyData.startDate) : null,
         endDate: companyData.endDate ? new Date(companyData.endDate) : null,
         jobTitle: companyData.jobTitle,
@@ -454,4 +529,12 @@ async getProfile(userId: string) {
 
   return { progress };
 }
+
+  private parseJson(value: string, fieldName: string) {
+    try {
+      return JSON.parse(value);
+    } catch {
+      throw new BadRequestException(`Invalid JSON for ${fieldName}`);
+    }
+  }
 }

@@ -11,11 +11,12 @@ import {
   Request,
   UseInterceptors,
   UploadedFile,
+  UploadedFiles,
   Query,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FileFieldsInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
   ApiOperation,
@@ -115,12 +116,17 @@ export class ProfileController {
 
   @Post('company')
   @ApiOperation({ summary: 'Add company/employer' })
+  @ApiConsumes('multipart/form-data')
   @ApiResponse({ status: 201, description: 'Company added successfully' })
   @ApiBody({
     schema: {
       type: 'object',
       properties: {
+        profilePhoto: { type: 'string', format: 'binary' },
+        coverPhoto: { type: 'string', format: 'binary' },
         name: { type: 'string', example: 'Ferozi Beach Club' },
+        companyName: { type: 'string', example: 'Ferozi Beach Club' },
+        businessName: { type: 'string', example: 'Ferozi Beach Club' },
         startDate: { type: 'string', format: 'date', example: '2020-01-01' },
         endDate: { type: 'string', format: 'date', example: '2023-12-31' },
         jobTitle: { type: 'string', example: 'Software Engineer' },
@@ -129,7 +135,21 @@ export class ProfileController {
       required: ['name'],
     },
   })
-  async addCompany(@Request() req, @Body() companyData: any) {
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'profilePhoto', maxCount: 1 },
+      { name: 'coverPhoto', maxCount: 1 },
+    ]),
+  )
+  async addCompany(
+    @Request() req,
+    @Body() companyData: any,
+    @UploadedFiles()
+    files?: {
+      profilePhoto?: Express.Multer.File[];
+      coverPhoto?: Express.Multer.File[];
+    },
+  ) {
     return this.profileService.addCompany(req.user.id, companyData);
   }
 
