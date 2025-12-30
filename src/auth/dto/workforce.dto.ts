@@ -184,7 +184,7 @@ export enum LeaveType {
   OTHER = 'other',
 }
 
-export class RequestLeaveDto {
+export class WorkforceRequestLeaveDto {
   @ApiProperty({ example: 'business-id', description: 'Business ID' })
   @IsString()
   businessId: string;
@@ -208,7 +208,7 @@ export class RequestLeaveDto {
 }
 
 // dto/swap-request.dto.ts
-export class CreateSwapRequestDto {
+export class WorkforceCreateSwapRequestDto {
   @ApiProperty({ example: 'shift-id', description: 'Shift to swap' })
   @IsString()
   shiftId: string;

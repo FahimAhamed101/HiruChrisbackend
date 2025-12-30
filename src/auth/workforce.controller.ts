@@ -36,8 +36,8 @@ import {
   DashboardQueryDto,
   WorkInsightsQueryDto,
   RecordEngagementDto,
-  RequestLeaveDto,
-  CreateSwapRequestDto,
+  WorkforceRequestLeaveDto,
+  WorkforceCreateSwapRequestDto,
   CreateTimeOffRequestDto,
 } from './dto/workforce.dto';
 
@@ -201,7 +201,7 @@ export class WorkforceController {
   @Post('leave')
   @ApiOperation({ summary: 'Request leave' })
   @ApiResponse({ status: 201, description: 'Leave request submitted successfully' })
-  async requestLeave(@Request() req, @Body() dto: RequestLeaveDto) {
+  async requestLeave(@Request() req, @Body() dto: WorkforceRequestLeaveDto) {
     return this.workforceService.requestLeave(req.user.id, dto);
   }
 
@@ -211,7 +211,7 @@ export class WorkforceController {
   @ApiOperation({ summary: 'Create a shift swap request' })
   @ApiResponse({ status: 201, description: 'Swap request created successfully' })
   @ApiResponse({ status: 404, description: 'Shift not found' })
-  async createSwapRequest(@Request() req, @Body() dto: CreateSwapRequestDto) {
+  async createSwapRequest(@Request() req, @Body() dto: WorkforceCreateSwapRequestDto) {
     return this.workforceService.createSwapRequest(req.user.id, dto);
   }
 

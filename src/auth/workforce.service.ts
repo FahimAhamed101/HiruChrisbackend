@@ -17,8 +17,8 @@ import {
   DashboardQueryDto,
   WorkInsightsQueryDto,
   RecordEngagementDto,
-  RequestLeaveDto,
-  CreateSwapRequestDto,
+  WorkforceRequestLeaveDto,
+  WorkforceCreateSwapRequestDto,
   CreateTimeOffRequestDto,
 } from './dto/workforce.dto';
 
@@ -818,7 +818,7 @@ export class WorkforceService {
 
   // ==================== LEAVE MANAGEMENT ====================
 
-  async requestLeave(userId: string, dto: RequestLeaveDto) {
+  async requestLeave(userId: string, dto: WorkforceRequestLeaveDto) {
     const leave = await this.prisma.leaveRequest.create({
       data: {
         userId,
@@ -839,7 +839,7 @@ export class WorkforceService {
 
   // ==================== SWAP REQUESTS ====================
 
-  async createSwapRequest(userId: string, dto: CreateSwapRequestDto) {
+  async createSwapRequest(userId: string, dto: WorkforceCreateSwapRequestDto) {
     const shift = await this.prisma.shift.findUnique({
       where: { id: dto.shiftId },
     });

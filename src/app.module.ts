@@ -12,10 +12,10 @@ import { ColleaguesJobModule } from './auth/colleagues-job.module';
 import { CoinModule } from './auth/coin.module';
 import { ScheduleModule } from './auth/schedule.module';
 import { LeaveTrackingModule } from './auth/leave-tracking.module';
-
+import { ScheduleTemplateModule } from './auth/schedule-template.module';
 @Module({
   imports: [
-    PrismaModule, ProfileModule, WorkforceModule,ColleaguesJobModule,CoinModule,ScheduleModule,LeaveTrackingModule,
+    PrismaModule, ProfileModule, WorkforceModule, ScheduleTemplateModule,ColleaguesJobModule,CoinModule,ScheduleModule,LeaveTrackingModule,
     AuthModule,  ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',

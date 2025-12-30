@@ -147,7 +147,25 @@ model OTP {
   @@index([expiresAt])
   @@map("otps")
 }
-
+model ShiftTemplate {
+  id              String   @id @default(cuid())
+  businessId      String
+  name            String
+  shiftStartTime  String   // HH:mm format
+  shiftEndTime    String   // HH:mm format
+  breakStartTime  String?  // HH:mm format
+  breakEndTime    String?  // HH:mm format
+  notes           String?  @db.Text
+  requiredRoles   Json?    // Array of { roleName: string, count: number }
+  
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([businessId])
+  @@map("shift_templates")
+}
 model Business {
   id          String   @id @default(cuid())
   name        String
@@ -174,7 +192,7 @@ model Business {
   jobListings     JobListing[]
   ratings         Rating[]
   roles           Role[]
-  
+  shiftTemplates  ShiftTemplate[]
   @@map("businesses")
 }
 
