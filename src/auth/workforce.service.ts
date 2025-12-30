@@ -21,8 +21,14 @@ import {
   WorkforceCreateSwapRequestDto,
   CreateTimeOffRequestDto,
 } from './dto/workforce.dto';
-import { UpdateRolePermissionsDto } from './dto/roles.dto';
-import { UserRole } from './enums/roles.enum';
+import {
+  AssignRoleDto,
+  CreatePredefinedRoleDto,
+  CreateRoleDto,
+  UpdateRoleDto,
+  UpdateRolePermissionsDto,
+} from './dto/roles.dto';
+import { ROLE_PERMISSIONS, UserRole } from './enums/roles.enum';
 
 @Injectable()
 export class WorkforceService {
@@ -572,6 +578,232 @@ export class WorkforceService {
     return {
       message: 'Businesses selected successfully',
       selectedCount: dto.businessIds.length,
+    };
+  }
+
+  // ==================== ROLE MANAGEMENT ====================
+
+  async getRoles(userId: string, businessId: string) {
+    const business = await this.getOwnedBusiness(userId, businessId);
+
+    const roles = await this.prisma.role.findMany({
+      where: { businessId: business.id },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return roles.map(role => ({
+      id: role.id,
+      name: role.name,
+      permissions: role.permissions,
+      isPredefined: role.isPredefined,
+      createdAt: role.createdAt,
+    }));
+  }
+
+  async getRolesCatalog(userId: string, businessId: string) {
+    await this.getOwnedBusiness(userId, businessId);
+
+    const catalog = await this.getRolePermissionsCatalog();
+    const roles = await this.prisma.role.findMany({
+      where: { businessId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return {
+      predefinedRoles: Object.values(UserRole).map(role => ({
+        id: role,
+        label: this.formatRoleName(role),
+      })),
+      customRoles: roles.map(role => ({
+        id: role.id,
+        name: role.name,
+        isPredefined: role.isPredefined,
+        permissions: role.permissions,
+      })),
+      permissionSections: catalog.sections,
+    };
+  }
+
+  async createPredefinedRole(userId: string, dto: CreatePredefinedRoleDto) {
+    const business = await this.getOwnedBusiness(userId, dto.businessId);
+
+    const normalizedRole = this.normalizeRoleCode(dto.role);
+    const isKnownRole = Object.values(UserRole).includes(normalizedRole as UserRole);
+    const name = isKnownRole
+      ? this.formatRoleName(normalizedRole as UserRole)
+      : this.formatCustomRoleName(dto.role);
+
+    const existing = await this.prisma.role.findFirst({
+      where: {
+        businessId: business.id,
+        name,
+      },
+    });
+
+    if (existing) {
+      throw new ConflictException('Role with this name already exists');
+    }
+
+    const permissions = isKnownRole
+      ? await this.buildSectionedPermissionsFromRole(normalizedRole as UserRole)
+      : {};
+    await this.validatePermissionsInput(permissions);
+
+    const role = await this.prisma.role.create({
+      data: {
+        businessId: business.id,
+        name,
+        permissions: permissions as any,
+        isPredefined: true,
+      },
+    });
+
+    return {
+      message: 'Role created successfully',
+      role: {
+        id: role.id,
+        name: role.name,
+        permissions: role.permissions,
+        isPredefined: role.isPredefined,
+      },
+    };
+  }
+
+  async createRole(userId: string, dto: CreateRoleDto) {
+    const business = await this.getOwnedBusiness(userId, dto.businessId);
+
+    const existing = await this.prisma.role.findFirst({
+      where: { businessId: business.id, name: dto.name },
+    });
+
+    if (existing) {
+      throw new ConflictException('Role with this name already exists');
+    }
+
+    await this.validatePermissionsInput(dto.permissions);
+
+    const role = await this.prisma.role.create({
+      data: {
+        businessId: business.id,
+        name: dto.name,
+        permissions: dto.permissions as any,
+        isPredefined: dto.isPredefined || false,
+      },
+    });
+
+    return {
+      message: 'Role created successfully',
+      role: {
+        id: role.id,
+        name: role.name,
+        permissions: role.permissions,
+        isPredefined: role.isPredefined,
+      },
+    };
+  }
+
+  async getRole(userId: string, roleId: string) {
+    const role = await this.getOwnedRole(userId, roleId);
+
+    return {
+      id: role.id,
+      name: role.name,
+      permissions: role.permissions,
+      isPredefined: role.isPredefined,
+    };
+  }
+
+  async updateRole(userId: string, roleId: string, dto: UpdateRoleDto) {
+    const role = await this.getOwnedRole(userId, roleId);
+
+    if (dto.name && dto.name !== role.name) {
+      const existing = await this.prisma.role.findFirst({
+        where: { businessId: role.businessId, name: dto.name },
+      });
+      if (existing) {
+        throw new ConflictException('Role with this name already exists');
+      }
+    }
+
+    await this.validatePermissionsInput(dto.permissions);
+
+    const updated = await this.prisma.role.update({
+      where: { id: role.id },
+      data: {
+        ...(dto.name && { name: dto.name }),
+        ...(dto.permissions && { permissions: dto.permissions as any }),
+      },
+    });
+
+    return {
+      message: 'Role updated successfully',
+      role: {
+        id: updated.id,
+        name: updated.name,
+        permissions: updated.permissions,
+        isPredefined: updated.isPredefined,
+      },
+    };
+  }
+
+  async deleteRole(userId: string, roleId: string) {
+    const role = await this.getOwnedRole(userId, roleId);
+
+    const usersWithRole = await this.prisma.userBusiness.count({
+      where: {
+        businessId: role.businessId,
+        role: role.name,
+      },
+    });
+
+    if (usersWithRole > 0) {
+      throw new BadRequestException(
+        `Cannot delete role that is assigned to ${usersWithRole} user(s)`,
+      );
+    }
+
+    await this.prisma.role.delete({ where: { id: role.id } });
+
+    return { message: 'Role deleted successfully' };
+  }
+
+  async assignRoleToUser(ownerId: string, dto: AssignRoleDto) {
+    const business = await this.getOwnedBusiness(ownerId, dto.businessId);
+
+    const role = await this.prisma.role.findFirst({
+      where: {
+        id: dto.roleId,
+        businessId: business.id,
+      },
+    });
+
+    if (!role) {
+      throw new NotFoundException('Role not found');
+    }
+
+    const userBusiness = await this.prisma.userBusiness.findFirst({
+      where: {
+        userId: dto.userId,
+        businessId: dto.businessId,
+      },
+    });
+
+    if (!userBusiness) {
+      throw new NotFoundException('User is not part of this business');
+    }
+
+    await this.prisma.userBusiness.update({
+      where: { id: userBusiness.id },
+      data: { role: role.name },
+    });
+
+    return {
+      message: 'Role assigned successfully',
+      user: {
+        userId: dto.userId,
+        role: role.name,
+        businessId: dto.businessId,
+      },
     };
   }
 
@@ -1129,6 +1361,33 @@ private buildTopPerformers(shifts: any[], employeeCount: number) {
     };
   }
 
+  private async buildSectionedPermissionsFromRole(role: UserRole) {
+    const catalog = await this.getRolePermissionsCatalog();
+    const permissionToSection = new Map<string, string>();
+
+    for (const section of catalog.sections) {
+      for (const permission of section.permissions) {
+        permissionToSection.set(permission.id, section.id);
+      }
+    }
+
+    const sectioned: Record<string, Record<string, boolean>> = {};
+    const permissions = ROLE_PERMISSIONS[role] || [];
+
+    for (const permission of permissions) {
+      const sectionId = permissionToSection.get(permission);
+      if (!sectionId) continue;
+
+      if (!sectioned[sectionId]) {
+        sectioned[sectionId] = {};
+      }
+
+      sectioned[sectionId][permission] = true;
+    }
+
+    return sectioned;
+  }
+
   private async validatePermissionsInput(
     permissions?: Record<string, Record<string, boolean>>,
   ) {
@@ -1196,6 +1455,19 @@ private buildTopPerformers(shifts: any[], employeeCount: number) {
     }
 
     return business;
+  }
+
+  private async getOwnedRole(userId: string, roleId: string) {
+    const role = await this.prisma.role.findUnique({
+      where: { id: roleId },
+    });
+
+    if (!role) {
+      throw new NotFoundException('Role not found');
+    }
+
+    await this.getOwnedBusiness(userId, role.businessId);
+    return role;
   }
 
   private validateUploadedImages(files: Express.Multer.File[]) {

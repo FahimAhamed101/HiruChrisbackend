@@ -41,7 +41,13 @@ import {
   WorkforceCreateSwapRequestDto,
   CreateTimeOffRequestDto,
 } from './dto/workforce.dto';
-import { UpdateRolePermissionsDto } from './dto/roles.dto';
+import {
+  AssignRoleDto,
+  CreatePredefinedRoleDto,
+  CreateRoleDto,
+  UpdateRoleDto,
+  UpdateRolePermissionsDto,
+} from './dto/roles.dto';
 
 @ApiTags('workforce')
 @Controller('workforce')
@@ -133,6 +139,80 @@ export class WorkforceController {
   @ApiResponse({ status: 200, description: 'Businesses selected successfully' })
   async selectBusinesses(@Request() req, @Body() dto: SelectBusinessDto) {
     return this.workforceService.selectBusinesses(req.user.id, dto);
+  }
+
+  // ==================== ROLE MANAGEMENT ====================
+
+  @Get('roles')
+  @ApiOperation({ summary: 'Get roles for a business (owner only)' })
+  @ApiResponse({ status: 200, description: 'Roles retrieved successfully' })
+  @ApiQuery({ name: 'businessId', required: true, description: 'Business ID' })
+  async getRoles(@Request() req, @Query('businessId') businessId: string) {
+    return this.workforceService.getRoles(req.user.id, businessId);
+  }
+
+  @Get('roles/catalog')
+  @ApiOperation({ summary: 'Get roles catalog and permissions' })
+  @ApiResponse({ status: 200, description: 'Role catalog retrieved successfully' })
+  @ApiQuery({ name: 'businessId', required: true, description: 'Business ID' })
+  async getRolesCatalog(@Request() req, @Query('businessId') businessId: string) {
+    return this.workforceService.getRolesCatalog(req.user.id, businessId);
+  }
+
+  @Post('roles')
+  @ApiOperation({ summary: 'Create a custom role (owner only)' })
+  @ApiResponse({ status: 201, description: 'Role created successfully' })
+  @ApiResponse({ status: 409, description: 'Role already exists' })
+  async createRole(@Request() req, @Body() dto: CreateRoleDto) {
+    return this.workforceService.createRole(req.user.id, dto);
+  }
+
+  @Post('roles/predefined')
+  @ApiOperation({ summary: 'Create a predefined role (owner only)' })
+  @ApiResponse({ status: 201, description: 'Role created successfully' })
+  @ApiResponse({ status: 409, description: 'Role already exists' })
+  async createPredefinedRole(@Request() req, @Body() dto: CreatePredefinedRoleDto) {
+    return this.workforceService.createPredefinedRole(req.user.id, dto);
+  }
+
+  @Get('roles/:id')
+  @ApiOperation({ summary: 'Get role details (owner only)' })
+  @ApiResponse({ status: 200, description: 'Role retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'Role not found' })
+  @ApiParam({ name: 'id', description: 'Role ID' })
+  async getRole(@Request() req, @Param('id') roleId: string) {
+    return this.workforceService.getRole(req.user.id, roleId);
+  }
+
+  @Put('roles/:id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update role (owner only)' })
+  @ApiResponse({ status: 200, description: 'Role updated successfully' })
+  @ApiResponse({ status: 404, description: 'Role not found' })
+  @ApiParam({ name: 'id', description: 'Role ID' })
+  async updateRole(
+    @Request() req,
+    @Param('id') roleId: string,
+    @Body() dto: UpdateRoleDto,
+  ) {
+    return this.workforceService.updateRole(req.user.id, roleId, dto);
+  }
+
+  @Delete('roles/:id')
+  @ApiOperation({ summary: 'Delete role (owner only)' })
+  @ApiResponse({ status: 200, description: 'Role deleted successfully' })
+  @ApiResponse({ status: 404, description: 'Role not found' })
+  @ApiParam({ name: 'id', description: 'Role ID' })
+  async deleteRole(@Request() req, @Param('id') roleId: string) {
+    return this.workforceService.deleteRole(req.user.id, roleId);
+  }
+
+  @Post('roles/assign')
+  @ApiOperation({ summary: 'Assign role to user (owner only)' })
+  @ApiResponse({ status: 200, description: 'Role assigned successfully' })
+  @ApiResponse({ status: 404, description: 'Role or user not found' })
+  async assignRole(@Request() req, @Body() dto: AssignRoleDto) {
+    return this.workforceService.assignRoleToUser(req.user.id, dto);
   }
 
   // ==================== ROLE PERMISSIONS ====================
