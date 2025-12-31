@@ -56,6 +56,8 @@ export class WorkforceService {
     const todayStart = new Date(today.setHours(0, 0, 0, 0));
     const todayEnd = new Date(today.setHours(23, 59, 59, 999));
 
+    const businessIds = user.userBusinesses.map(ub => ub.business.id);
+
     // Get today's shifts
     const todayShifts = await this.prisma.shift.findMany({
       where: {
@@ -64,7 +66,11 @@ export class WorkforceService {
           gte: todayStart,
           lte: todayEnd,
         },
-        ...(query.businessId && { businessId: query.businessId }),
+        ...(query.businessId
+          ? { businessId: query.businessId }
+          : businessIds.length > 0
+            ? { businessId: { in: businessIds } }
+            : {}),
       },
       include: {
         business: true,
@@ -893,10 +899,33 @@ export class WorkforceService {
   }
 
   async getUserShifts(userId: string, query: DashboardQueryDto) {
-    const where: any = { userId };
+    const where: any = {};
 
     if (query.businessId) {
+      const access = await this.prisma.userBusiness.findFirst({
+        where: { userId, businessId: query.businessId },
+      });
+
+      if (!access) {
+        throw new BadRequestException('No access to this business');
+      }
+
+      const normalizedRole = this.normalizeRoleCode(access.role || '');
+      const isKnownRole = Object.values(UserRole).includes(normalizedRole as UserRole);
+      const hasViewAllPermission = isKnownRole
+        ? ROLE_PERMISSIONS[normalizedRole as UserRole]?.includes('view_all_shifts')
+        : await this.hasCustomRolePermission(
+            query.businessId,
+            access.role || '',
+            'view_all_shifts',
+          );
+
       where.businessId = query.businessId;
+      if (!hasViewAllPermission) {
+        where.userId = userId;
+      }
+    } else {
+      where.userId = userId;
     }
 
     if (query.date) {
@@ -1365,6 +1394,39 @@ private buildTopPerformers(shifts: any[], employeeCount: number) {
         })),
       })),
     };
+  }
+
+  private async hasCustomRolePermission(
+    businessId: string,
+    roleName: string,
+    permission: string,
+  ): Promise<boolean> {
+    if (!roleName) return false;
+
+    const role = await this.prisma.role.findFirst({
+      where: {
+        businessId,
+        name: { equals: roleName, mode: 'insensitive' },
+      },
+      select: { permissions: true },
+    });
+
+    return this.hasPermission(role?.permissions as any, permission);
+  }
+
+  private hasPermission(
+    permissions: Record<string, Record<string, boolean>> | null | undefined,
+    permission: string,
+  ): boolean {
+    if (!permissions || typeof permissions !== 'object') return false;
+
+    for (const section of Object.values(permissions)) {
+      if (section && typeof section === 'object' && section[permission] === true) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private async buildSectionedPermissionsFromRole(role: UserRole) {

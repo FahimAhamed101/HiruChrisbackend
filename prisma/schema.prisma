@@ -9,7 +9,7 @@ datasource db {
 
 model User {
   id           String    @id @default(cuid())
-  email        String    @unique
+  email        String?   @unique
   phoneNumber  String?   @unique
   password     String
   fullName     String?
@@ -313,7 +313,8 @@ model LeaveRequest {
   status     String    @default("pending") // pending, approved, rejected
   approvedBy String?
   approvedAt DateTime?
-  
+  rejectionReason   String?  @db.Text
+  rejectionCategory String?
 
   user       User      @relation("UserLeaveRequests", fields: [userId], references: [id], onDelete: Cascade)
   business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -665,7 +666,9 @@ model Holiday {
   date        DateTime
   name        String
   description String?
-  businessId  String?  // If null, applies to all businesses
+  businessId  String?
+  type        String?  // national, federal, religious, company, other
+  appliesTo   String?  // all_employees, specific_roles, specific_departments
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
@@ -14,6 +15,7 @@ import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { OtpService } from './otp.service';
 import { EmailService } from './email.service';
 import { SmsService } from './sms.service';
+import { ResponseMessagesEnums } from '../common/enums/response-messages.enum';
 
 @Injectable()
 export class AuthService {
@@ -26,13 +28,19 @@ export class AuthService {
   ) {}
 
   async signup(signupDto: SignupDto) {
-    // Check if user exists by email
-    const existingUserByEmail = await this.prisma.user.findUnique({
-      where: { email: signupDto.email },
-    });
+    if (!signupDto.email && !signupDto.phoneNumber) {
+      throw new BadRequestException(ResponseMessagesEnums.INVALID_DATA_PROVIDED);
+    }
 
-    if (existingUserByEmail) {
-      throw new ConflictException('User with this email already exists');
+    // Check if user exists by email
+    if (signupDto.email) {
+      const existingUserByEmail = await this.prisma.user.findUnique({
+        where: { email: signupDto.email },
+      });
+
+      if (existingUserByEmail) {
+        throw new ConflictException(ResponseMessagesEnums.ALREADY_EXIST);
+      }
     }
 
     // Check if user exists by phone number (if provided)
@@ -42,17 +50,18 @@ export class AuthService {
       });
 
       if (existingUserByPhone) {
-        throw new ConflictException('User with this phone number already exists');
+        throw new ConflictException(ResponseMessagesEnums.ALREADY_EXIST);
       }
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(signupDto.password, 10);
+    // Hash password (generate a random one if omitted for phone-only signup)
+    const rawPassword = signupDto.password || randomBytes(24).toString('hex');
+    const hashedPassword = await bcrypt.hash(rawPassword, 10);
 
     // Create user
     const user = await this.prisma.user.create({
       data: {
-        email: signupDto.email,
+        email: signupDto.email || null,
         phoneNumber: signupDto.phoneNumber,
         password: hashedPassword,
         fullName: signupDto.fullName,
@@ -69,7 +78,7 @@ export class AuthService {
     const roleSnapshot = await this.getUserRoleSnapshot(user.id);
 
     return {
-      message: 'Account created successfully. Please verify your email/phone with OTP.',
+      message: ResponseMessagesEnums.SUCCESS,
       user: {
         id: user.id,
         email: user.email,
@@ -97,27 +106,25 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException(ResponseMessagesEnums.NOT_AUTHENTICATED);
     }
 
     if (!user.isActive) {
-      throw new UnauthorizedException('Account is deactivated');
+      throw new UnauthorizedException(ResponseMessagesEnums.NOT_AUTHENTICATED);
     }
 
     // Verify password
     const isPasswordValid = await bcrypt.compare(loginDto.password, user.password);
 
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException(ResponseMessagesEnums.NOT_AUTHENTICATED);
     }
 
     // Check if user is verified
     if (!user.isVerified) {
       // Resend verification OTP
       await this.sendVerificationOtp(user);
-      throw new UnauthorizedException(
-        'Please verify your account first. Verification OTP has been resent.',
-      );
+      throw new UnauthorizedException(ResponseMessagesEnums.NOT_AUTHENTICATED);
     }
 
     // Generate tokens
@@ -134,7 +141,7 @@ export class AuthService {
     const roleSnapshot = await this.getUserRoleSnapshot(user.id);
 
     return {
-      message: 'Login successful',
+      message: ResponseMessagesEnums.SUCCESS,
       user: {
         id: user.id,
         email: user.email,
@@ -163,20 +170,18 @@ export class AuthService {
       // 3. Or send OTP for phone verification first
       
       // For this example, we'll throw an error
-      throw new UnauthorizedException('Phone number not registered. Please sign up first.');
+      throw new UnauthorizedException(ResponseMessagesEnums.USER_NOT_FOUND);
     }
 
     if (!user.isActive) {
-      throw new UnauthorizedException('Account is deactivated');
+      throw new UnauthorizedException(ResponseMessagesEnums.NOT_AUTHENTICATED);
     }
 
     // Check if user is verified
     if (!user.isVerified) {
       // Send verification OTP
       await this.sendVerificationOtp(user);
-      throw new UnauthorizedException(
-        'Please verify your phone number first. Verification OTP has been sent.',
-      );
+      throw new UnauthorizedException(ResponseMessagesEnums.NOT_AUTHENTICATED);
     }
 
     // For phone-only login, generate and send OTP
@@ -190,7 +195,7 @@ export class AuthService {
     await this.smsService.sendLoginOtp(phoneNumber, otp.code);
 
     return {
-      message: 'OTP sent to your phone number',
+      message: ResponseMessagesEnums.SUCCESS,
       userId: user.id,
       phoneNumber: user.phoneNumber,
     };
@@ -203,7 +208,7 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException(ResponseMessagesEnums.USER_NOT_FOUND);
     }
 
     // Verify OTP
@@ -214,7 +219,7 @@ export class AuthService {
     );
 
     if (!isValid) {
-      throw new BadRequestException('Invalid or expired OTP');
+      throw new BadRequestException(ResponseMessagesEnums.INVALID_DATA_PROVIDED);
     }
 
     // Generate tokens
@@ -223,7 +228,7 @@ export class AuthService {
     const roleSnapshot = await this.getUserRoleSnapshot(user.id);
 
     return {
-      message: 'Login successful',
+      message: ResponseMessagesEnums.SUCCESS,
       user: {
         id: user.id,
         email: user.email,
@@ -240,20 +245,30 @@ export class AuthService {
   }
 
   async verifyOtp(verifyOtpDto: VerifyOtpDto) {
-    const { email, phoneNumber, otpCode } = verifyOtpDto;
+    const { emailOrPhone, email, phoneNumber, otpCode } = verifyOtpDto;
+    const resolvedEmail =
+      emailOrPhone && emailOrPhone.includes('@') ? emailOrPhone : email;
+    const resolvedPhone =
+      emailOrPhone && !emailOrPhone.includes('@')
+        ? emailOrPhone
+        : phoneNumber;
+
+    if (!resolvedEmail && !resolvedPhone) {
+      throw new BadRequestException(ResponseMessagesEnums.INVALID_DATA_PROVIDED);
+    }
 
     // Find user by email or phone number
     const user = await this.prisma.user.findFirst({
       where: {
         OR: [
-          { email: email },
-          { phoneNumber: phoneNumber },
+          { email: resolvedEmail },
+          { phoneNumber: resolvedPhone },
         ],
       },
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException(ResponseMessagesEnums.USER_NOT_FOUND);
     }
 
     // Verify OTP
@@ -264,7 +279,7 @@ export class AuthService {
     );
 
     if (!isValid) {
-      throw new BadRequestException('Invalid or expired OTP');
+      throw new BadRequestException(ResponseMessagesEnums.INVALID_DATA_PROVIDED);
     }
 
     // Mark user as verified
@@ -279,7 +294,7 @@ export class AuthService {
     const roleSnapshot = await this.getUserRoleSnapshot(updatedUser.id);
 
     return {
-      message: 'Account verified successfully',
+      message: ResponseMessagesEnums.SUCCESS,
       user: {
         id: updatedUser.id,
         email: updatedUser.email,
@@ -297,7 +312,7 @@ export class AuthService {
 
   async resendOtp(email?: string, phoneNumber?: string) {
     if (!email && !phoneNumber) {
-      throw new BadRequestException('Email or phone number is required');
+      throw new BadRequestException(ResponseMessagesEnums.INVALID_DATA_PROVIDED);
     }
 
     // Find user by email or phone number
@@ -311,14 +326,14 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException(ResponseMessagesEnums.USER_NOT_FOUND);
     }
 
     // Send verification OTP
     await this.sendVerificationOtp(user);
 
     return {
-      message: 'OTP has been resent successfully',
+      message: ResponseMessagesEnums.SUCCESS,
       deliveryMethod: user.email ? 'email' : 'sms',
     };
   }
@@ -337,7 +352,7 @@ export class AuthService {
     if (!user) {
       // For security, don't reveal if user exists
       return {
-        message: 'If an account exists, a password reset OTP has been sent.',
+        message: ResponseMessagesEnums.SUCCESS,
       };
     }
 
@@ -352,12 +367,12 @@ export class AuthService {
     if (user.email && user.email === emailOrPhone) {
       await this.emailService.sendPasswordResetOtp(user.email, otp.code);
       return {
-        message: 'Password reset OTP has been sent to your email',
+        message: ResponseMessagesEnums.SUCCESS,
       };
     } else if (user.phoneNumber && user.phoneNumber === emailOrPhone) {
       await this.smsService.sendPasswordResetOtp(user.phoneNumber, otp.code);
       return {
-        message: 'Password reset OTP has been sent to your phone',
+        message: ResponseMessagesEnums.SUCCESS,
       };
     }
   }
@@ -374,7 +389,7 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException(ResponseMessagesEnums.USER_NOT_FOUND);
     }
 
     // Verify OTP
@@ -385,7 +400,7 @@ export class AuthService {
     );
 
     if (!isValid) {
-      throw new BadRequestException('Invalid or expired OTP');
+      throw new BadRequestException(ResponseMessagesEnums.INVALID_DATA_PROVIDED);
     }
 
     // Update password
@@ -396,7 +411,7 @@ export class AuthService {
     });
 
     return {
-      message: 'Password has been reset successfully',
+      message: ResponseMessagesEnums.SUCCESS,
     };
   }
 
@@ -411,12 +426,12 @@ export class AuthService {
       });
 
       if (!user) {
-        throw new UnauthorizedException('User not found');
+        throw new UnauthorizedException(ResponseMessagesEnums.USER_NOT_FOUND);
       }
 
       return await this.generateTokens(user.id);
     } catch (error) {
-      throw new UnauthorizedException('Invalid refresh token');
+      throw new UnauthorizedException(ResponseMessagesEnums.NOT_AUTHENTICATED);
     }
   }
 

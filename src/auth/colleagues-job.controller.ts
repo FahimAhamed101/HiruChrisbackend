@@ -12,6 +12,8 @@ import {
   HttpStatus,
   UseInterceptors,
   UploadedFile,
+  Delete,
+  Put,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -21,6 +23,7 @@ import {
   ApiBearerAuth,
   ApiQuery,
   ApiConsumes,
+  ApiParam,
 } from '@nestjs/swagger';
 import { ColleaguesJobService } from './colleagues-job.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -31,6 +34,7 @@ import {
   SearchJobsDto,
   CreateJobListingDto,
   ApplyToJobDto,
+  GetJobApplicationsDto,
 } from './dto/join-colleagues.dto';
 
 @ApiTags('colleagues-and-jobs')
@@ -41,6 +45,70 @@ export class ColleaguesJobController {
   constructor(private colleaguesJobService: ColleaguesJobService) {}
 
   // ==================== JOIN COLLEAGUES ====================
+
+@Get('applications/received')
+@ApiOperation({ 
+  summary: 'Get received job applications (Owner/Manager)',
+  description: 'View all applications received for business job postings'
+})
+@ApiResponse({ status: 200, description: 'Applications retrieved successfully' })
+@ApiQuery({ name: 'jobId', required: false })
+@ApiQuery({ name: 'status', required: false })
+async getReceivedApplications(
+  @Request() req,
+  @Query() query: GetJobApplicationsDto,
+) {
+  return this.colleaguesJobService.getReceivedApplications(req.user.id, query);
+}
+
+@Get('applications/sent')
+@ApiOperation({ 
+  summary: 'Get sent job applications (Employee)',
+  description: 'View all job applications you have sent'
+})
+@ApiResponse({ status: 200, description: 'Applications retrieved successfully' })
+async getSentApplications(@Request() req) {
+  return this.colleaguesJobService.getMyApplications(req.user.id);
+}
+
+@Put('applications/:id/status')
+@HttpCode(HttpStatus.OK)
+@ApiOperation({ 
+  summary: 'Update application status (Owner/Manager)',
+  description: 'Accept, reject, or mark as reviewed'
+})
+@ApiResponse({ status: 200, description: 'Status updated successfully' })
+@ApiResponse({ status: 403, description: 'Insufficient permissions' })
+@ApiParam({ name: 'id', description: 'Application ID' })
+async updateApplicationStatus(
+  @Request() req,
+  @Param('id') applicationId: string,
+  @Body('status') status: 'reviewed' | 'accepted' | 'rejected',
+  @Body('notes') notes?: string,
+) {
+  return this.colleaguesJobService.updateApplicationStatus(
+    req.user.id,
+    applicationId,
+    status,
+    notes,
+  );
+}
+
+@Delete('applications/:id')
+@ApiOperation({ 
+  summary: 'Withdraw job application (Employee)',
+  description: 'Cancel a pending application'
+})
+@ApiResponse({ status: 200, description: 'Application withdrawn successfully' })
+@ApiParam({ name: 'id', description: 'Application ID' })
+async withdrawApplication(
+  @Request() req,
+  @Param('id') applicationId: string,
+) {
+  return this.colleaguesJobService.withdrawApplication(req.user.id, applicationId);
+}
+
+
 
   @Post('colleague-code/generate')
   @ApiOperation({ 

@@ -1,5 +1,5 @@
 // dto/join-colleagues.dto.ts
-import { IsString, IsNotEmpty, Length, Matches, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, Length, Matches, IsOptional, IsEnum } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class ScanQRDto {
@@ -62,7 +62,49 @@ export enum JobCategory {
   TECHNOLOGY = 'technology',
   OTHER = 'other',
 }
+export class UpdateApplicationStatusDto {
+  @ApiProperty({ 
+    example: 'application-id', 
+    description: 'Application ID' 
+  })
+  @IsString()
+  @IsNotEmpty()
+  applicationId: string;
 
+  @ApiProperty({ 
+    example: 'reviewed', 
+    enum: ['reviewed', 'accepted', 'rejected'],
+    description: 'New status' 
+  })
+  @IsEnum(['reviewed', 'accepted', 'rejected'])
+  status: 'reviewed' | 'accepted' | 'rejected';
+
+  @ApiProperty({ 
+    example: 'Great candidate!', 
+    required: false 
+  })
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}
+
+export class GetJobApplicationsDto {
+  @ApiProperty({ 
+    example: 'job-listing-id', 
+    required: false 
+  })
+  @IsOptional()
+  @IsString()
+  jobId?: string;
+
+  @ApiProperty({ 
+    enum: ['pending', 'reviewed', 'accepted', 'rejected', 'all'],
+    example: 'pending',
+    required: false 
+  })
+  @IsOptional()
+  status?: 'pending' | 'reviewed' | 'accepted' | 'rejected' | 'all';
+}
 export class SearchJobsDto {
   @ApiProperty({ 
     example: 'hotel manager', 
@@ -158,16 +200,22 @@ export class CreateJobListingDto {
   @ApiProperty({ 
     enum: JobType, 
     example: 'full_time',
-    description: 'Job type' 
+    description: 'Job type',
+    required: false
   })
-  jobType: JobType;
+  @IsOptional()
+  @IsEnum(JobType)
+  jobType?: JobType;
 
   @ApiProperty({ 
     enum: JobCategory, 
     example: 'hospitality',
-    description: 'Job category' 
+    description: 'Job category',
+    required: false
   })
-  category: JobCategory;
+  @IsOptional()
+  @IsEnum(JobCategory)
+  category?: JobCategory;
 
   @ApiProperty({ example: 20, description: 'Hourly rate', required: false })
   @IsOptional()

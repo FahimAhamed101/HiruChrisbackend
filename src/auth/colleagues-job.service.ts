@@ -13,6 +13,7 @@ import {
   SearchJobsDto,
   CreateJobListingDto,
   ApplyToJobDto,
+  GetJobApplicationsDto,
 } from './dto/join-colleagues.dto';
 import * as crypto from 'crypto';
 
@@ -21,6 +22,197 @@ export class ColleaguesJobService {
   constructor(private prisma: PrismaService) {}
 
   // ==================== JOIN COLLEAGUES ====================
+
+
+async getReceivedApplications(userId: string, dto: GetJobApplicationsDto) {
+  // Verify user owns/manages businesses
+  const userBusinesses = await this.prisma.userBusiness.findMany({
+    where: {
+      userId,
+      role: { in: ['owner', 'manager'] },
+    },
+    select: { businessId: true },
+  });
+
+  if (userBusinesses.length === 0) {
+    throw new BadRequestException('No permission to view applications');
+  }
+
+  const businessIds = userBusinesses.map(ub => ub.businessId);
+
+  const where: any = {
+    job: {
+      businessId: { in: businessIds },
+    },
+  };
+
+  if (dto.jobId) {
+    where.jobId = dto.jobId;
+  }
+
+  if (dto.status && dto.status !== 'all') {
+    where.status = dto.status;
+  }
+
+  const applications = await this.prisma.jobApplication.findMany({
+    where,
+    include: {
+      applicant: {
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          phoneNumber: true,
+          profileImage: true,
+          profile: {
+            select: {
+              bio: true,
+              companies: true,
+            },
+          },
+        },
+      },
+      job: {
+        include: {
+          business: {
+            select: {
+              id: true,
+              name: true,
+              logo: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  return {
+    applications: applications.map(app => ({
+      id: app.id,
+      status: app.status,
+      appliedAt: app.createdAt,
+      updatedAt: app.updatedAt,
+      coverLetter: app.coverLetter,
+      resumePath: app.resumePath,
+      applicant: {
+        id: app.applicant.id,
+        name: app.applicant.fullName,
+        email: app.applicant.email,
+        phone: app.applicant.phoneNumber,
+        profileImage: app.applicant.profileImage,
+        bio: app.applicant.profile?.bio,
+        experience: app.applicant.profile?.companies || [],
+      },
+      job: {
+        id: app.job.id,
+        title: app.job.title,
+        hourlyRate: app.job.hourlyRate,
+        location: app.job.location,
+        jobType: app.job.jobType,
+        business: app.job.business,
+      },
+    })),
+    total: applications.length,
+  };
+}
+
+async updateApplicationStatus(
+  userId: string,
+  applicationId: string,
+  status: 'reviewed' | 'accepted' | 'rejected',
+  notes?: string,
+) {
+  const application = await this.prisma.jobApplication.findUnique({
+    where: { id: applicationId },
+    include: {
+      job: {
+        include: { business: true },
+      },
+      applicant: {
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+        },
+      },
+    },
+  });
+
+  if (!application) {
+    throw new NotFoundException('Application not found');
+  }
+
+  // Verify user has permission
+  const userBusiness = await this.prisma.userBusiness.findFirst({
+    where: {
+      userId,
+      businessId: application.job.businessId,
+      role: { in: ['owner', 'manager'] },
+    },
+  });
+
+  if (!userBusiness) {
+    throw new BadRequestException('No permission to update this application');
+  }
+
+  const updated = await this.prisma.jobApplication.update({
+    where: { id: applicationId },
+    data: { status },
+  });
+
+  // TODO: Send notification to applicant about status change
+
+  return {
+    message: `Application ${status} successfully`,
+    application: {
+      id: updated.id,
+      status: updated.status,
+      applicantName: application.applicant.fullName,
+      jobTitle: application.job.title,
+    },
+  };
+}
+
+async withdrawApplication(userId: string, applicationId: string) {
+  const application = await this.prisma.jobApplication.findUnique({
+    where: { id: applicationId },
+    include: {
+      job: {
+        select: {
+          id: true,
+          title: true,
+        },
+      },
+    },
+  });
+
+  if (!application) {
+    throw new NotFoundException('Application not found');
+  }
+
+  if (application.applicantId !== userId) {
+    throw new BadRequestException('You can only withdraw your own applications');
+  }
+
+  if (application.status !== 'pending') {
+    throw new BadRequestException(
+      `Cannot withdraw application with status: ${application.status}`,
+    );
+  }
+
+  await this.prisma.jobApplication.delete({
+    where: { id: applicationId },
+  });
+
+  return {
+    message: 'Application withdrawn successfully',
+    jobTitle: application.job.title,
+  };
+}
+
+
+
 
   async generateColleagueCode(userId: string, dto: GenerateColleagueCodeDto) {
     const user = await this.prisma.user.findUnique({
@@ -118,11 +310,6 @@ export class ColleaguesJobService {
       throw new BadRequestException('This code has expired');
     }
 
-    // Can't join yourself
-    if (colleagueCode.userId === userId) {
-      throw new BadRequestException('You cannot join yourself as a colleague');
-    }
-
     const targetBusinessId = businessId || colleagueCode.businessId;
 
     if (!targetBusinessId) {
@@ -166,16 +353,21 @@ export class ColleaguesJobService {
     });
 
     // Create connection between users (optional - for social features)
-    await this.createUserConnection(userId, colleagueCode.userId);
+    if (userId !== colleagueCode.userId) {
+      await this.createUserConnection(userId, colleagueCode.userId);
+    }
 
     return {
       message: 'Successfully joined as a colleague!',
       business: userBusiness.business,
-      connectedWith: {
-        id: colleagueCode.user.id,
-        name: colleagueCode.user.fullName,
-        profileImage: colleagueCode.user.profileImage,
-      },
+      connectedWith:
+        userId !== colleagueCode.userId
+          ? {
+              id: colleagueCode.user.id,
+              name: colleagueCode.user.fullName,
+              profileImage: colleagueCode.user.profileImage,
+            }
+          : null,
     };
   }
 
@@ -263,38 +455,48 @@ export class ColleaguesJobService {
     }
 
     if (dto.minRate || dto.maxRate) {
+      const minRate = dto.minRate ? Number(dto.minRate) : undefined;
+      const maxRate = dto.maxRate ? Number(dto.maxRate) : undefined;
+
       where.hourlyRate = {};
-      if (dto.minRate) where.hourlyRate.gte = dto.minRate;
-      if (dto.maxRate) where.hourlyRate.lte = dto.maxRate;
+      if (Number.isFinite(minRate)) where.hourlyRate.gte = minRate;
+      if (Number.isFinite(maxRate)) where.hourlyRate.lte = maxRate;
     }
 
-    const [jobs, total] = await Promise.all([
-      this.prisma.jobListing.findMany({
-        where,
-        include: {
-          business: {
-            select: {
-              id: true,
-              name: true,
-              logo: true,
-              type: true,
-            },
-          },
-          _count: {
-            select: {
-              applications: true,
-            },
+    const jobs = await this.prisma.jobListing.findMany({
+      where,
+      include: {
+        business: {
+          select: {
+            id: true,
+            name: true,
+            logo: true,
+            type: true,
           },
         },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-      }),
-      this.prisma.jobListing.count({ where }),
-    ]);
+        _count: {
+          select: {
+            applications: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const seenBusinesses = new Set<string>();
+    const uniqueJobs = jobs.filter(job => {
+      if (seenBusinesses.has(job.businessId)) {
+        return false;
+      }
+      seenBusinesses.add(job.businessId);
+      return true;
+    });
+
+    const pagedJobs = uniqueJobs.slice(skip, skip + limit);
+    const total = uniqueJobs.length;
 
     return {
-      jobs: jobs.map(job => this.formatJobListing(job)),
+      jobs: pagedJobs.map(job => this.formatJobListing(job)),
       pagination: {
         page,
         limit,
@@ -347,8 +549,8 @@ export class ColleaguesJobService {
         title: dto.title,
         description: dto.description,
         location: dto.location,
-        jobType: dto.jobType,
-        category: dto.category,
+        jobType: dto.jobType || 'full_time',
+        category: dto.category || 'other',
         hourlyRate: dto.hourlyRate,
         requiredSkills: dto.requiredSkills || [],
         deadline: dto.deadline ? new Date(dto.deadline) : null,
@@ -367,9 +569,18 @@ export class ColleaguesJobService {
 
   async applyToJob(userId: string, dto: ApplyToJobDto) {
     // Check if job exists
-    const job = await this.prisma.jobListing.findUnique({
+    let job = await this.prisma.jobListing.findUnique({
       where: { id: dto.jobId },
     });
+
+    if (!job) {
+      job = await this.prisma.jobListing.findFirst({
+        where: {
+          businessId: dto.jobId,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
 
     if (!job) {
       throw new NotFoundException('Job listing not found');
@@ -382,7 +593,7 @@ export class ColleaguesJobService {
     // Check if already applied
     const existingApplication = await this.prisma.jobApplication.findFirst({
       where: {
-        jobId: dto.jobId,
+        jobId: job.id,
         applicantId: userId,
       },
     });
@@ -393,7 +604,7 @@ export class ColleaguesJobService {
 
     const application = await this.prisma.jobApplication.create({
       data: {
-        jobId: dto.jobId,
+        jobId: job.id,
         applicantId: userId,
         coverLetter: dto.coverLetter,
         resumePath: dto.resumePath,
